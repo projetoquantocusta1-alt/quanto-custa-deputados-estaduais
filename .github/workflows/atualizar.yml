@@ -1,0 +1,51 @@
+name: Atualizar deputados estaduais
+
+on:
+  schedule:
+    - cron: "41 10 * * *"   # todo dia às 07:41 (horário de Brasília)
+  workflow_dispatch:
+    inputs:
+      forcar:
+        description: "Baixar de novo todos os meses (sim/não)"
+        required: false
+        default: "não"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: estaduais-ce
+  cancel-in-progress: false
+
+jobs:
+  rodar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Testes
+        run: python -m pytest -q tests
+      - name: Coletar na Alece e montar o site
+        run: |
+          if [ "${{ github.event.inputs.forcar }}" = "sim" ]; then python atualizar.py --minutos 170 --forcar; else python atualizar.py --minutos 170; fi
+      - name: Publicar
+        if: always()
+        run: |
+          git config user.name  "robo-quanto-custa"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p docs/dados dados_brutos
+          git add docs/dados dados_brutos
+          if ! git diff --cached --quiet; then
+            git commit -m "estaduais: dados de $(date -u +%Y-%m-%d)"
+            # tenta salvar até 5 vezes (o GitHub recusa se outro envio chegou no mesmo instante)
+            for i in 1 2 3 4 5; do
+              git pull --rebase -X ours origin main || true
+              if git push; then break; fi
+              echo "Envio recusado; nova tentativa em $((i*20)) s"; sleep $((i*20))
+              [ $i = 5 ] && exit 1
+            done
+          fi
