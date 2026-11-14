@@ -131,7 +131,7 @@ async function rAssembleia() {
 async function notasDe(id) {
   const anos = tot() ? E.meta.anos : [E.ano], out = [];
   for (const a of anos) { const r = await resumo(a), F = fatorDe(r);
-    if (!r?.deputados.some((d) => d.id === id)) continue;
+    if (!r?.deputados.some((d) => d.id === id && d.notas > 0)) continue;   // quem não usou a verba não tem arquivo de notas
     (await getJSON(`dados/${a}/notas/${encodeURIComponent(id)}.json`).catch(() => [])).forEach((n) => out.push({ mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }
   return out;
 }
