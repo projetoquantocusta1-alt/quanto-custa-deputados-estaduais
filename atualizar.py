@@ -248,6 +248,22 @@ def resolver_nomes(meses_brutos: list[dict], cad: dict) -> tuple[dict, dict]:
     return id_vdp, id_folha
 
 
+# ------------------------------------------------------------------ previsão
+def prever(folha_mes: dict, verba_mes: dict, decimo_pago: float, ult_folha: int, ult_verba: int) -> dict:
+    """Quanto o deputado ainda deve custar até 31/12 (estimativa).
+    Só para quem estava na folha do último mês publicado. Salário: o último salário bruto × meses que faltam,
+    mais o 13º se ainda não foi pago. Verba: ritmo médio dos meses fechados (o último mês publicado costuma
+    vir incompleto) para os meses que faltam e para completar o último mês."""
+    if not ult_folha or ult_folha not in folha_mes:
+        return {"ativo": False, "restante": 0.0, "folha": 0.0, "verba": 0.0}
+    sal = folha_mes[ult_folha]
+    folha_rest = sal * (12 - ult_folha) + (sal if decimo_pago <= 0 else 0.0)
+    fechados = [v for m, v in verba_mes.items() if m < ult_verba]
+    ritmo = sum(fechados) / len(fechados) if fechados else 0.0
+    verba_rest = ritmo * (12 - ult_verba) + max(0.0, ritmo - verba_mes.get(ult_verba, 0.0)) if ult_verba else 0.0
+    return {"ativo": True, "restante": round(folha_rest + verba_rest, 2), "folha": round(folha_rest, 2), "verba": round(verba_rest, 2)}
+
+
 # ------------------------------------------------------------------ montagem
 def montar(hoje: date):
     cad = ler(BRUTOS / "cadastro.json", {}) or {}
@@ -282,7 +298,8 @@ def montar(hoje: date):
                                "partido": inf.get("partido", ""), "foto": inf.get("foto", ""), "atual": bool(inf.get("atual")),
                                "url": config.ALECE["perfil"].format(slug=i) if i in info_por_id else "",
                                "folha": 0.0, "meses_folha": 0, "verba": 0.0, "meses_verba": 0, "notas": 0,
-                               "categorias": defaultdict(float), "situacao": ""}
+                               "categorias": defaultdict(float), "situacao": "",
+                               "_verba_mes": defaultdict(float), "_folha_mes": {}, "_decimo": 0.0}
             return x
 
         for mes in sorted(por_ano[ano], key=lambda d: d["mes"]):
@@ -303,6 +320,7 @@ def montar(hoje: date):
                 if x.pop("_nome_da_folha", False):   # fora do cadastro: mostra o nome parlamentar, não o da folha
                     x["nome"] = r["deputado"].title()
                 x["verba"] += r["valor"]
+                x["_verba_mes"][mes["mes"]] += r["valor"]
                 x["notas"] += 1
                 x["categorias"][r["categoria"]] += r["valor"]
                 vistos.add(i)
@@ -324,6 +342,8 @@ def montar(hoje: date):
                 if not x["nome_completo"]:
                     x["nome_completo"] = f["nome"]
                 x["folha"] += f["bruta"] - f.get("teto", 0) + f.get("decimo", 0)
+                x["_folha_mes"][mes["mes"]] = f["bruta"] - f.get("teto", 0)
+                x["_decimo"] += f.get("decimo", 0)
                 x["meses_folha"] += 1
                 x["situacao"] = f["situacao"]
             for cat, c in ((mes.get("folha") or {}).get("categorias") or {}).items():
@@ -333,8 +353,14 @@ def montar(hoje: date):
                 pa["n_soma"] += c["n"]
 
         fator = (ip.get("fatores") or {}).get(str(ano)) or (ip.get("fatores") or {}).get(ano) or 1.0
+        # previsão até dezembro (estimativa), só no ano em andamento
+        ult_folha = max((m for x in deps.values() for m in x["_folha_mes"]), default=0)
+        ult_verba = max((m for x in deps.values() for m in x["_verba_mes"]), default=0)
+        em_andamento = ano == hoje.year and ult_folha < 12
         lista = []
         for x in deps.values():
+            vm, fm, dec = x.pop("_verba_mes"), x.pop("_folha_mes"), x.pop("_decimo")
+            x["previsao"] = prever(fm, vm, dec, ult_folha, ult_verba) if em_andamento else None
             x.pop("_nome_da_folha", None)
             x["folha"], x["verba"] = round(x["folha"], 2), round(x["verba"], 2)
             x["total"] = round(x["folha"] + x["verba"], 2)
@@ -355,6 +381,11 @@ def montar(hoje: date):
                        "total": round(sum(x["total"] for x in lista), 2), "deputados": len(lista)},
             "categorias": {k: round(v, 2) for k, v in sorted(cats.items(), key=lambda kv: -kv[1])},
             "por_mes": por_mes,
+            "fechado": not em_andamento,
+            "previsao": {"ult_folha": ult_folha, "ult_verba": ult_verba,
+                         "restante": round(sum((x["previsao"] or {}).get("restante", 0) for x in lista), 2),
+                         "folha": round(sum((x["previsao"] or {}).get("folha", 0) for x in lista), 2),
+                         "verba": round(sum((x["previsao"] or {}).get("verba", 0) for x in lista), 2)} if em_andamento else None,
             "deputados": lista,
         }
         gravar(SAIDA / str(ano) / "resumo.json", resumo)
