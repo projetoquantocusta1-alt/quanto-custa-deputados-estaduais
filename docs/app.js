@@ -163,11 +163,30 @@ async function fichaDeputado(id) {
       .map(([r, v, o]) => `<div class="kpi"><div class="rot">${r}</div><div class="val num">${v}</div><div class="obs">${o}</div></div>`).join("")}</div>
     <div class="d-grade2"><div><h3 class="d-sec">Para onde foi a verba</h3><table class="ranking">${cats.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${brl(v)}</td></tr>`).join("") || "<tr><td>Sem notas no período</td></tr>"}</table></div>
       <div><h3 class="d-sec">Quem mais recebeu</h3><table class="ranking">${fs.map(([doc, f]) => `<tr><td class="quebra"><a href="#" data-forn="${esc(doc)}">${esc(f.nome)}</a></td><td class="num">${brl(f.v)}</td></tr>`).join("") || "<tr><td>—</td></tr>"}</table></div></div>
+    <p class="sub"><button class="btn" id="card-dep" type="button">Gerar imagem para compartilhar</button></p>
     <h3 class="d-sec">Todas as notas da verba (${nf(N.length)})</h3>
     <div class="tabela-rolagem"><table class="ranking notas-tab"><thead><tr><th>Mês</th><th>Tipo</th><th>Fornecedor</th><th class="num">Valor</th><th>Detalhe</th></tr></thead><tbody>${
       N.map((n) => `<tr><td class="data">${mesBR(n.mes)}</td><td>${esc(n.cat)}</td><td class="quebra">${esc(n.credor)}<span class="sub"> ${esc(fmtDoc(n.doc))}</span></td><td class="num ${n.valor < 0 ? "neg" : ""}">${brl(n.valor, 2)}</td><td class="quebra sub">${esc(n.desc)} <span class="mono">${esc(n.emp)}</span></td></tr>`).join("")}</tbody></table></div>
     <p class="dica">Valores negativos são anulações de empenho (dinheiro que voltou). Fonte: Portal da Transparência da Alece.</p>`;
   $("#ficha").hidden = false; history.replaceState(null, "", "#dep-" + encodeURIComponent(id));
+  $("#card-dep").onclick = async () => {
+    const D = (await dados()).filter((x) => x.id !== "nao-identificado").sort((a, b) => b.total - a.total), pos = D.findIndex((x) => x.id === d.id) + 1, n = D.length, caro = pos <= Math.ceil(n / 2);
+    const meses = Math.max(d.meses_folha, d.meses_verba) || 0;
+    const destaques = [];
+    if (fs[0]) destaques.push([`Quem mais recebeu da verba: ${fs[0][1].nome}`, `${brl(fs[0][1].v)} · ${fmtDoc(fs[0][0])}`, "#118dff"]);
+    if (cats[0]) destaques.push([`Maior gasto da verba: ${cats[0][0]}`, brl(cats[0][1]), "#107c41"]);
+    CartaoQC.abrir({
+      titulo: tot() ? `Custo de todos os anos (${rotAno()}) · Deputado estadual` : `Custo do mandato em ${E.ano} · Deputado estadual`,
+      nome: d.nome, foto: d.id !== "nao-identificado" ? `dados/fotos/${d.id}.jpg` : "", semFoto: d.id === "nao-identificado",
+      linhas: [[d.partido, "Assembleia Legislativa do Ceará"].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${tot() ? "" : " em " + E.ano}` : ""],
+      faixa: pos ? { titulo: pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${n - pos + 1}º mais econômico`, sub: `entre ${n} deputados estaduais do Ceará · ${tot() ? "todos os anos" : "em " + E.ano}`, cor: caro ? "#c4161c" : "#107c41" } : null,
+      valorRot: "Custou aos cofres públicos", valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
+      destaques: [...(d.prev ? [[`Previsão: mais ${CartaoQC.compacto(d.prev)} até dezembro`, "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)", "#9c2a6f"]] : []), ...destaques],
+      composicao: [["Salário (folha)", d.folha, "#14283F"], ["Verba de desempenho parlamentar", d.verba, "#2475B8"]],
+      fonte: `Fonte: Assembleia Legislativa do Ceará${corrigir() ? " · valores corrigidos pelo IPCA" : ""} · sem a equipe do gabinete`,
+      arquivo: `${semAcento(d.nome).replace(/\W+/g, "-")}-${tot() ? "todos-os-anos" : E.ano}`,
+    });
+  };
 }
 async function fichaFornecedor(doc) {
   const anos = tot() ? E.meta.anos : [E.ano], L = [];

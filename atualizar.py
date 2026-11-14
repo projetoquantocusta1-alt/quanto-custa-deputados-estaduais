@@ -100,6 +100,11 @@ def atualizar_cadastro():
         if k not in atuais:
             x["atual"] = False
     gravar(BRUTOS / "cadastro.json", cad)
+    try:   # fotos oficiais no próprio site (para a imagem de compartilhar)
+        from coletor.fotos import baixar_fotos
+        baixar_fotos([(x["slug"], x.get("foto")) for x in cad.values() if x.get("slug")], SAIDA / "fotos", BRUTOS / "fotos_sem.json")
+    except Exception as e:  # noqa: BLE001
+        log.warning("fotos: %s", e)
     log.info("cadastro: %d deputados no site da Alece (%d no total guardado)", len(lista), len(cad))
     return cad
 
