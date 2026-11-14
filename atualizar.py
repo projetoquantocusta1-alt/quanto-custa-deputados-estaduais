@@ -214,10 +214,25 @@ def resolver_nomes(meses_brutos: list[dict], cad: dict) -> tuple[dict, dict]:
             pendentes.append((v, k))
     # nomes digitados com erro de quem não está no cadastro: quase igual a outro nome já resolvido
     chaves_ok = {alece.chave(v): i for v, i in id_vdp.items()}
+    # reembolso ao próprio deputado: a verba de "Leo Suricate" paga, como pessoa física, "LEONARDO DE SOUSA XAVIER",
+    # que é deputado na folha ("...SOUZA XAVIER") -> é a mesma pessoa
+    credores_pf = defaultdict(set)
+    for m in meses_brutos:
+        for r in m.get("vdp") or []:
+            if r.get("tipo") == "PF" and r.get("credor"):
+                credores_pf[r["deputado"]].add(alece.norm(r["credor"]))
     for v, k in pendentes:
         m = _melhor(k, chaves_ok, 0.86)
+        achado = None
+        if not m:
+            cands = {folha_norm[f] for c in credores_pf.get(v, ()) for f in folha_norm if _parecido(c, f, 0.9)}
+            achado = cands.pop() if len(cands) == 1 else None
         if m:
             id_vdp[v] = chaves_ok[m]
+        elif achado:
+            id_vdp[v] = id_folha.get(achado) or slug(achado)
+            id_folha.setdefault(achado, id_vdp[v])
+            chaves_ok[k] = id_vdp[v]
         elif len(k.split()) >= 2:
             id_vdp[v] = slug(k)                                  # pessoa sem salário ligado: aparece só com a verba
             chaves_ok[k] = id_vdp[v]
@@ -285,6 +300,8 @@ def montar(hoje: date):
                 if i == NAO_IDENTIFICADO:
                     sem_casar[ano].add(r["deputado"])
                 x = dep(i, r["deputado"])
+                if x.pop("_nome_da_folha", False):   # fora do cadastro: mostra o nome parlamentar, não o da folha
+                    x["nome"] = r["deputado"].title()
                 x["verba"] += r["valor"]
                 x["notas"] += 1
                 x["categorias"][r["categoria"]] += r["valor"]
@@ -300,7 +317,10 @@ def montar(hoje: date):
             # folha
             for f in folha:
                 i = id_folha.get(f["nome"]) or slug(f["nome"])
+                novo = i not in deps
                 x = dep(i, f["nome"], f["nome"])
+                if novo and i not in info_por_id:
+                    x["_nome_da_folha"] = True
                 if not x["nome_completo"]:
                     x["nome_completo"] = f["nome"]
                 x["folha"] += f["bruta"] - f.get("teto", 0) + f.get("decimo", 0)
@@ -315,6 +335,7 @@ def montar(hoje: date):
         fator = (ip.get("fatores") or {}).get(str(ano)) or (ip.get("fatores") or {}).get(ano) or 1.0
         lista = []
         for x in deps.values():
+            x.pop("_nome_da_folha", None)
             x["folha"], x["verba"] = round(x["folha"], 2), round(x["verba"], 2)
             x["total"] = round(x["folha"] + x["verba"], 2)
             x["categorias"] = {k: round(v, 2) for k, v in sorted(x["categorias"].items(), key=lambda kv: -kv[1])}

@@ -143,6 +143,8 @@ async function fichaDeputado(id) {
   const fs = Object.entries(porForn).sort((a, b) => b[1].v - a[1].v).slice(0, 10);
   $("#ficha-corpo").innerHTML = `<div class="ficha-cab">${foto(d)}<div><h2>${esc(d.nome)}</h2><p class="sub">${esc(d.partido || "")}${d.nome_completo ? " · " + esc(d.nome_completo) : ""}${d.situacao ? " · " + esc(d.situacao.toLowerCase()) : ""}</p>
     ${d.url ? `<p class="sub"><a href="${esc(d.url)}" target="_blank" rel="noopener">Página oficial na Alece</a></p>` : ""}</div></div>
+    ${d.id === "nao-identificado" ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
+      : d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui. Se você sabe o nome completo, peça a correção.</p>` : ""}
     <div class="kpis">${[["Custo total", brl(d.total), rotAno()], ["Salário (folha bruta)", brl(d.folha), `${d.meses_folha} mês(es) na folha`], ["Verba (VDP)", brl(d.verba), `${d.meses_verba} mês(es) com notas`]]
       .map(([r, v, o]) => `<div class="kpi"><div class="rot">${r}</div><div class="val num">${v}</div><div class="obs">${o}</div></div>`).join("")}</div>
     <div class="d-grade2"><div><h3 class="d-sec">Para onde foi a verba</h3><table class="ranking">${cats.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${brl(v)}</td></tr>`).join("") || "<tr><td>Sem notas no período</td></tr>"}</table></div>
@@ -176,7 +178,14 @@ async function render() {
 async function rMetodo() {
   const M = E.meta?.meses || {}, rec = Object.values(M), n = soma(rec.map((x) => x.recusadas)), v = soma(rec.map((x) => x.recusadas_valor));
   const vazios = Object.entries(M).filter(([, x]) => !x.verba).map(([k]) => mesBR(k));
-  $("#m-recusadas").innerHTML = `<b>Conferência</b>: ${nf(n)} linha(s) recusadas no arquivo da verba (${brl(v, 2)}), de ${nf(rec.length)} mês(es) baixados.${vazios.length ? ` Meses ainda sem notas publicadas: ${esc(vazios.join(", "))}.` : ""}`;
+  const semCasar = Object.entries(E.meta?.sem_casar || {}).filter(([, l]) => l.length).map(([a, l]) => `${a}: ${l.map((x) => `“${x}”`).join(", ")}`);
+  const soVerba = [];
+  for (const a of E.meta?.anos || []) { const r = await resumo(a); (r?.deputados || []).forEach((d) => { if (d.verba > 0 && !d.folha && d.id !== "nao-identificado") soVerba.push(`${d.nome} (${a})`); }); }
+  $("#m-recusadas").innerHTML = `<b>Divergências encontradas nos dados da Assembleia</b> (avisamos sempre que a informação falta ou não fecha):<ul>
+    <li>${nf(n)} linha(s) do arquivo da verba não eram de um deputado e ficaram de fora (${brl(v, 2)}), em ${nf(rec.length)} mês(es) baixados.</li>
+    ${semCasar.length ? `<li>Nomes na planilha da verba que não são de nenhum deputado identificável, somados em “Nome não identificado na planilha”: ${esc(semCasar.join(" · "))}.</li>` : ""}
+    ${soVerba.length ? `<li>Aparecem na verba com um nome que não encontramos na folha de pagamento, por isso sem salário ligado: ${esc(soVerba.join(", "))}.</li>` : ""}
+    ${vazios.length ? `<li>Meses ainda sem notas da verba publicadas pela Assembleia: ${esc(vazios.join(", "))}.</li>` : ""}</ul>`;
 }
 function irPara(p) {
   E.pag = p; $$(".pagina").forEach((s) => s.classList.toggle("ativa", s.dataset.pag === p));
