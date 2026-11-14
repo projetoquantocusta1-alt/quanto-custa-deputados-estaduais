@@ -253,6 +253,12 @@ def resolver_nomes(meses_brutos: list[dict], cad: dict) -> tuple[dict, dict]:
     return id_vdp, id_folha
 
 
+def grupo_forn(doc: str) -> str:
+    """Arquivo do índice de fornecedores (o site calcula igual): 2 primeiros dígitos do CNPJ; CPF mascarado em "pf"."""
+    d = re.sub(r"\D", "", doc or "")
+    return d[:2] if len(d) == 14 else "pf"
+
+
 # ------------------------------------------------------------------ previsão
 def prever(folha_mes: dict, verba_mes: dict, decimo_pago: float, ult_folha: int, ult_verba: int) -> dict:
     """Quanto o deputado ainda deve custar até 31/12 (estimativa).
@@ -365,6 +371,8 @@ def montar(hoje: date):
         lista = []
         for x in deps.values():
             vm, fm, dec = x.pop("_verba_mes"), x.pop("_folha_mes"), x.pop("_decimo")
+            x["mensal_verba"] = [round(vm.get(m, 0.0), 2) for m in range(1, 13)]
+            x["mensal_folha"] = [round(fm.get(m, 0.0), 2) for m in range(1, 13)]
             x["previsao"] = prever(fm, vm, dec, ult_folha, ult_verba) if em_andamento else None
             x.pop("_nome_da_folha", None)
             x["folha"], x["verba"] = round(x["folha"], 2), round(x["verba"], 2)
@@ -400,6 +408,23 @@ def montar(hoje: date):
                 velho.unlink()
         for i, ns in notas.items():
             gravar(pasta_notas / f"{i}.json", sorted(ns, key=lambda n: (n[0], n[1])))
+        # índice por fornecedor (a ficha do fornecedor lê um arquivo pequeno, e não as notas de todos os deputados)
+        grupos: dict[str, dict] = defaultdict(dict)
+        for i, ns in notas.items():
+            for mes_n, emp, cat, doc, credor, valor, desc in ns:
+                if not doc:
+                    continue
+                g = grupo_forn(doc)
+                f = grupos[g].setdefault(doc, {"nome": credor, "tipo": forn.get(doc, {}).get("tipo", ""), "notas": []})
+                f["notas"].append([mes_n, i, emp, cat, valor, desc])
+        pasta_f = SAIDA / str(ano) / "forn"
+        for velho in pasta_f.glob("*.json"):
+            if velho.stem not in grupos:
+                velho.unlink()
+        for g, conteudo in grupos.items():
+            for f in conteudo.values():
+                f["notas"].sort(key=lambda n: (n[0], n[2]), reverse=True)
+            gravar(pasta_f / f"{g}.json", conteudo)
         gravar(SAIDA / str(ano) / "fornecedores.json", {"campos": ["doc", "nome", "tipo", "total", "notas", "deputados"], "linhas": fornecedores})
         assembleia[str(ano)] = {cat: {"bruta": round(p["bruta"], 2), "media_pessoas": round(p["n_soma"] / p["n_meses"]) if p["n_meses"] else 0,
                                       "meses": p["n_meses"]} for cat, p in sorted(pessoal.items(), key=lambda kv: -kv[1]["bruta"])}

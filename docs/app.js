@@ -141,66 +141,112 @@ async function rAssembleia() {
     L.map(([c, x]) => `<tr><td class="quebra">${esc(rot(c))}</td><td class="num">${nf(x.pessoas)}</td><td class="num"><b>${brl(x.bruta)}</b></td><td class="num">${nf(100 * x.bruta / (T || 1), 1)}%</td></tr>`).join("")}</tbody>`;
 }
 
-// ---------------------------------------------------------------- fichas
-async function notasDe(id) {
-  const anos = tot() ? E.meta.anos : [E.ano], out = [];
-  for (const a of anos) { const r = await resumo(a), F = fatorDe(r);
-    if (!r?.deputados.some((d) => d.id === id && d.notas > 0)) continue;   // quem não usou a verba não tem arquivo de notas
-    (await getJSON(`dados/${a}/notas/${encodeURIComponent(id)}.json`).catch(() => [])).forEach((n) => out.push({ mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }
-  return out;
+// ---------------------------------------------------------------- fichas (mesmo formato das fichas dos deputados federais)
+const etqTipo = (t) => (t === "PJ" ? `<span class="etq pj">Empresa</span>` : t === "PF" ? `<span class="etq pf">Pessoa física</span>` : `<span class="etq">sem documento</span>`);
+const grupoForn = (doc) => { const d = String(doc || "").replace(/\D/g, ""); return d.length === 14 ? d.slice(0, 2) : "pf"; };
+const cacheJ = {};
+const jsonC = (u) => (cacheJ[u] = cacheJ[u] || getJSON(u).catch(() => null));
+// notas do deputado nos anos pedidos (em paralelo; só anos em que ele usou a verba)
+async function notasDe(id, anos) {
+  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r);
+    if (!r?.deputados.some((d) => d.id === id && d.notas > 0)) return [];
+    return ((await jsonC(`dados/${a}/notas/${encodeURIComponent(id)}.json`)) || []).map((n) => ({ ano: a, mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }));
+  return lotes.flat();
 }
-async function fichaDeputado(id) {
-  const d = (await dados()).find((x) => x.id === id); if (!d) return;
-  const N = (await notasDe(id)).sort((a, b) => (a.mes < b.mes ? 1 : -1));
-  const cats = Object.entries(d.categorias).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+function abrirFicha(html) { $("#ficha-corpo").innerHTML = html; $("#ficha").hidden = false; $("#ficha-corpo").scrollTop = 0; $(".ficha-caixa").scrollTop = 0; }
+const tabelaNotas = (N, comDep, nomes) => `<div class="tabela-rolagem"><table class="ranking notas-tab"><thead><tr><th>Mês</th>${comDep ? "<th>Deputado</th>" : ""}<th>Tipo</th>${comDep ? "" : "<th>Fornecedor</th>"}<th class="num">Valor</th><th>Detalhe</th></tr></thead><tbody>${
+  N.map((n) => `<tr><td class="data">${mesBR(n.mes)}</td>${comDep ? `<td><a href="#" data-dep="${esc(n.dep)}" data-ano="${n.ano}">${esc(nomes[n.dep] || n.dep)}</a></td>` : ""}<td class="quebra sub">${esc(n.cat)}</td>${comDep ? "" : `<td class="quebra">${n.doc ? `<a href="#" data-forn="${esc(n.doc)}">${esc(n.credor)}</a>` : esc(n.credor)}<span class="sub"> ${esc(fmtDoc(n.doc))}</span></td>`}<td class="num ${n.valor < 0 ? "neg" : ""}">${brl(n.valor, 2)}</td><td class="quebra sub">${esc(n.desc)} <span class="mono">${esc(n.emp)}</span></td></tr>`).join("")}</tbody></table></div>`;
+
+async function fichaDeputado(id, anoPedido) {
+  const todos = anoPedido == null && tot(), anos = todos ? E.meta.anos : [anoPedido ?? E.ano], rot = todos ? rotAno() : String(anos[0]);
+  const rs = await Promise.all(anos.map(resumo));
+  // custo de cada ano (para o gráfico e a tabela) e posição no período
+  const porAno = rs.filter(Boolean).map((r) => { const F = fatorDe(r), L = r.deputados.filter((x) => x.id !== "nao-identificado").slice().sort((a, b) => b.total - a.total);
+    const x = r.deputados.find((y) => y.id === id); return x ? { ano: r.ano, x, F, pos: L.findIndex((y) => y.id === id) + 1, de: L.length } : null; }).filter(Boolean);
+  if (!porAno.length) return;
+  const D = todos ? await dados() : porAno[0].x ? [{ ...porAno[0].x }] : [];
+  const d = todos ? D.find((x) => x.id === id) : (() => { const { x, F } = porAno[0]; return { ...x, folha: x.folha * F, verba: x.verba * F, total: x.total * F, prev: x.previsao?.ativo ? x.previsao.restante * F : 0,
+    categorias: Object.fromEntries(Object.entries(x.categorias || {}).map(([k, v]) => [k, v * F])) }; })();
+  if (!d) return;
+  const Lp = todos ? (await dados()).filter((x) => x.id !== "nao-identificado").sort((a, b) => b.total - a.total) : null;
+  const pos = todos ? Lp.findIndex((x) => x.id === id) + 1 : porAno[0].pos, de = todos ? Lp.length : porAno[0].de, caro = pos && pos <= Math.ceil(de / 2);
+  const meses = todos ? soma(porAno.map((p) => Math.max(p.x.meses_folha, p.x.meses_verba))) : Math.max(d.meses_folha, d.meses_verba);
+  const N = (await notasDe(id, anos)).sort((a, b) => (a.ano * 100 + +String(a.mes).slice(5) < b.ano * 100 + +String(b.mes).slice(5) ? 1 : -1));
   const porForn = {}; N.forEach((n) => { const o = (porForn[n.doc] = porForn[n.doc] || { nome: n.credor, v: 0, n: 0 }); o.v += n.valor; o.n++; });
-  const fs = Object.entries(porForn).sort((a, b) => b[1].v - a[1].v).slice(0, 10);
-  $("#ficha-corpo").innerHTML = `<div class="ficha-cab">${foto(d)}<div><h2>${esc(d.nome)}</h2><p class="sub">${esc(d.partido || "")}${d.nome_completo ? " · " + esc(d.nome_completo) : ""}${d.situacao ? " · " + esc(d.situacao.toLowerCase()) : ""}</p>
-    ${d.url ? `<p class="sub"><a href="${esc(d.url)}" target="_blank" rel="noopener">Página oficial na Alece</a></p>` : ""}</div></div>
-    ${d.id === "nao-identificado" ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
-      : d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui. Se você sabe o nome completo, peça a correção.</p>` : ""}
-    <div class="kpis">${[["Custo total", brl(d.total), rotAno()], ["Salário (folha bruta)", brl(d.folha), `${d.meses_folha} mês(es) na folha`], ["Verba (VDP)", brl(d.verba), `${d.meses_verba} mês(es) com notas`], ...(d.prev ? [["Previsão até dezembro", "+" + brl(d.prev), "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)"]] : [])]
-      .map(([r, v, o]) => `<div class="kpi"><div class="rot">${r}</div><div class="val num">${v}</div><div class="obs">${o}</div></div>`).join("")}</div>
-    <div class="d-grade2"><div><h3 class="d-sec">Para onde foi a verba</h3><table class="ranking">${cats.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${brl(v)}</td></tr>`).join("") || "<tr><td>Sem notas no período</td></tr>"}</table></div>
-      <div><h3 class="d-sec">Quem mais recebeu</h3><table class="ranking">${fs.map(([doc, f]) => `<tr><td class="quebra"><a href="#" data-forn="${esc(doc)}">${esc(f.nome)}</a></td><td class="num">${brl(f.v)}</td></tr>`).join("") || "<tr><td>—</td></tr>"}</table></div></div>
+  const fs = Object.entries(porForn).filter(([k]) => k).sort((a, b) => b[1].v - a[1].v);
+  const cats = Object.entries(d.categorias || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const aviso = d.id === "nao-identificado" ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
+    : d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui.</p>` : "";
+  abrirFicha(`<div class="d-cab">${d.id !== "nao-identificado" ? `<img src="dados/fotos/${esc(d.id)}.jpg" data-alt="${esc(d.foto || "")}" alt="" onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else{this.style.visibility='hidden'}">` : ""}
+      <div><h2>${esc(d.nome)}</h2><div class="sub">${esc(d.partido || "")}${d.nome_completo ? " · " + esc(d.nome_completo) : ""} · ${todos ? `${porAno.length} ano(s) com dados entre ${rot}` : `${meses} ${meses === 1 ? "mês" : "meses"} com dados em ${rot}`}</div>
+        ${pos ? `<div class="selo-pos ${caro ? "" : "barato"}">${pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`} entre ${de} deputados estaduais do Ceará ${todos ? "(soma de todos os anos)" : "em " + rot}</div>` : ""}</div></div>
+    ${aviso}
+    <div class="sub">${todos ? "Custo somado de todos os anos" : "Custo do mandato em " + rot}${corrigir() ? " (valores de hoje)" : ""}</div>
+    <div class="d-total">${brl(d.total, 2)}</div>
+    <div class="sub">${meses ? brl(d.total / meses) + " por mês, em média · " : ""}${porExtenso(d.total)}${d.url ? ` · <a href="${esc(d.url)}" target="_blank" rel="noopener">página oficial na Alece</a>` : ""}</div>
+    <div class="pecas"><div class="peca" style="--c:#14283F"><div class="rot">Salário (folha bruta)</div><div class="val num">${brl(d.folha)}</div></div>
+      <div class="peca" style="--c:#2475B8"><div class="rot">Verba de desempenho parlamentar</div><div class="val num">${brl(d.verba)}</div></div>
+      ${d.prev ? `<div class="peca" style="--c:#9c2a6f"><div class="rot">Previsão até dezembro</div><div class="val num">+${brl(d.prev)}</div></div>` : ""}</div>
     <p class="sub"><button class="btn" id="card-dep" type="button">Gerar imagem para compartilhar</button></p>
+    <h3 class="d-sec">${todos ? "Custo em cada ano" : "Gasto por mês em " + rot}</h3><div class="canvas-box"><canvas id="g-ficha"></canvas></div>
+    ${todos ? `<div class="tabela-rolagem"><table class="ranking"><thead><tr><th>Ano</th><th>Partido</th><th class="num">Custo</th><th class="num">Posição</th><th></th></tr></thead><tbody>${porAno.slice().reverse().map((p) =>
+      `<tr><td>${p.ano}</td><td>${esc(p.x.partido || "")}</td><td class="num">${brl(p.x.total * p.F)}</td><td class="num">${p.pos ? `${p.pos}º de ${p.de}` : "—"}</td><td><a href="#" data-dep="${esc(id)}" data-ano="${p.ano}">ver ficha do ano</a></td></tr>`).join("")}</tbody></table></div>` : ""}
+    <div class="d-grade2"><div><h3 class="d-sec">Para onde foi a verba</h3><table class="ranking">${cats.map(([k, v]) => `<tr><td class="quebra">${esc(k)}</td><td class="num">${brl(v)}</td></tr>`).join("") || "<tr><td>Sem notas no período</td></tr>"}</table></div>
+      <div><h3 class="d-sec">Quem mais recebeu</h3><table class="ranking">${fs.slice(0, 10).map(([doc, f]) => `<tr><td class="quebra"><a href="#" data-forn="${esc(doc)}">${esc(f.nome)}</a><div class="sub">${esc(fmtDoc(doc))}</div></td><td class="num">${brl(f.v)}</td></tr>`).join("") || "<tr><td>—</td></tr>"}</table></div></div>
     <h3 class="d-sec">Todas as notas da verba (${nf(N.length)})</h3>
-    <div class="tabela-rolagem"><table class="ranking notas-tab"><thead><tr><th>Mês</th><th>Tipo</th><th>Fornecedor</th><th class="num">Valor</th><th>Detalhe</th></tr></thead><tbody>${
-      N.map((n) => `<tr><td class="data">${mesBR(n.mes)}</td><td>${esc(n.cat)}</td><td class="quebra">${esc(n.credor)}<span class="sub"> ${esc(fmtDoc(n.doc))}</span></td><td class="num ${n.valor < 0 ? "neg" : ""}">${brl(n.valor, 2)}</td><td class="quebra sub">${esc(n.desc)} <span class="mono">${esc(n.emp)}</span></td></tr>`).join("")}</tbody></table></div>
-    <p class="dica">Valores negativos são anulações de empenho (dinheiro que voltou). Fonte: Portal da Transparência da Alece.</p>`;
-  $("#ficha").hidden = false; history.replaceState(null, "", "#dep-" + encodeURIComponent(id));
-  $("#card-dep").onclick = async () => {
-    const D = (await dados()).filter((x) => x.id !== "nao-identificado").sort((a, b) => b.total - a.total), pos = D.findIndex((x) => x.id === d.id) + 1, n = D.length, caro = pos <= Math.ceil(n / 2);
-    const meses = Math.max(d.meses_folha, d.meses_verba) || 0;
+    ${N.length > 200 ? `<p class="sub"><button class="btn-sec" id="ver-notas" type="button">Mostrar as ${nf(N.length)} notas</button></p><div id="notas-box"></div>` : tabelaNotas(N, false)}
+    <p class="dica">Valores negativos são anulações de empenho (dinheiro que voltou). Fonte: Portal da Transparência da Alece.</p>`);
+  history.replaceState(null, "", "#dep-" + encodeURIComponent(id));
+  if ($("#ver-notas")) $("#ver-notas").onclick = (e) => { e.target.remove(); $("#notas-box").innerHTML = tabelaNotas(N, false); };
+  if (todos) grafico("g-ficha", { type: "bar", data: { labels: porAno.map((p) => p.ano), datasets: [{ label: "Salário", data: porAno.map((p) => p.x.folha * p.F), backgroundColor: "#14283F", stack: "s" }, { label: "Verba", data: porAno.map((p) => p.x.verba * p.F), backgroundColor: "#2475B8", stack: "s" }] },
+    options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } });
+  else { const x = porAno[0].x, F = porAno[0].F;
+    grafico("g-ficha", { type: "bar", data: { labels: MESES, datasets: [{ label: "Salário", data: (x.mensal_folha || []).map((v) => v * F), backgroundColor: "#14283F", stack: "s" }, { label: "Verba", data: (x.mensal_verba || []).map((v) => v * F), backgroundColor: "#2475B8", stack: "s" }] },
+      options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } }); }
+  $("#card-dep").onclick = () => {
     const destaques = [];
     if (fs[0]) destaques.push([`Quem mais recebeu da verba: ${fs[0][1].nome}`, `${brl(fs[0][1].v)} · ${fmtDoc(fs[0][0])}`, "#118dff"]);
     if (cats[0]) destaques.push([`Maior gasto da verba: ${cats[0][0]}`, brl(cats[0][1]), "#107c41"]);
     CartaoQC.abrir({
-      titulo: tot() ? `Custo de todos os anos (${rotAno()}) · Deputado estadual` : `Custo do mandato em ${E.ano} · Deputado estadual`,
+      titulo: `${todos ? `Custo de todos os anos (${rot})` : `Custo do mandato em ${rot}`} · Deputado estadual`,
       nome: d.nome, foto: d.id !== "nao-identificado" ? `dados/fotos/${d.id}.jpg` : "", semFoto: d.id === "nao-identificado",
-      linhas: [[d.partido, "Assembleia Legislativa do Ceará"].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${tot() ? "" : " em " + E.ano}` : ""],
-      faixa: pos ? { titulo: pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${n - pos + 1}º mais econômico`, sub: `entre ${n} deputados estaduais do Ceará · ${tot() ? "todos os anos" : "em " + E.ano}`, cor: caro ? "#c4161c" : "#107c41" } : null,
+      linhas: [[d.partido, "Assembleia Legislativa do Ceará"].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${todos ? "" : " em " + rot}` : ""],
+      faixa: pos ? { titulo: pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`, sub: `entre ${de} deputados estaduais do Ceará · ${todos ? "todos os anos" : "em " + rot}`, cor: caro ? "#c4161c" : "#107c41" } : null,
       valorRot: "Custou aos cofres públicos", valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
       destaques: [...(d.prev ? [[`Previsão: mais ${CartaoQC.compacto(d.prev)} até dezembro`, "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)", "#9c2a6f"]] : []), ...destaques],
       composicao: [["Salário (folha)", d.folha, "#14283F"], ["Verba de desempenho parlamentar", d.verba, "#2475B8"]],
       fonte: `Fonte: Assembleia Legislativa do Ceará${corrigir() ? " · valores corrigidos pelo IPCA" : ""} · sem a equipe do gabinete`,
-      arquivo: `${semAcento(d.nome).replace(/\W+/g, "-")}-${tot() ? "todos-os-anos" : E.ano}`,
+      arquivo: `${semAcento(d.nome).replace(/\W+/g, "-")}-${todos ? "todos-os-anos" : rot}`,
     });
   };
 }
-async function fichaFornecedor(doc) {
-  const anos = tot() ? E.meta.anos : [E.ano], L = [];
-  const D = await dados(), nomes = Object.fromEntries(D.map((d) => [d.id, d.nome]));
-  for (const id of D.map((d) => d.id)) for (const n of await notasDe(id)) if (n.doc === doc) L.push({ ...n, dep: id });
-  if (!L.length) return;
-  L.sort((a, b) => (a.mes < b.mes ? 1 : -1));
-  const porDep = {}; L.forEach((n) => (porDep[n.dep] = (porDep[n.dep] || 0) + n.valor));
-  $("#ficha-corpo").innerHTML = `<div class="ficha-cab"><div><h2>${esc(L[0].credor)}</h2><p class="sub mono">${esc(fmtDoc(doc))}</p></div></div>
-    <div class="kpis"><div class="kpi"><div class="rot">Recebido da verba</div><div class="val num">${brl(soma(L.map((n) => n.valor)))}</div><div class="obs">${rotAno()} · ${nf(L.length)} notas</div></div></div>
-    <h3 class="d-sec">Por deputado</h3><table class="ranking">${Object.entries(porDep).sort((a, b) => b[1] - a[1]).map(([id, v]) => `<tr><td><a href="#" data-dep="${esc(id)}">${esc(nomes[id] || id)}</a></td><td class="num">${brl(v, 2)}</td></tr>`).join("")}</table>
-    <h3 class="d-sec">Notas</h3><div class="tabela-rolagem"><table class="ranking notas-tab"><thead><tr><th>Mês</th><th>Deputado</th><th class="num">Valor</th><th>Detalhe</th></tr></thead><tbody>${
-      L.map((n) => `<tr><td class="data">${mesBR(n.mes)}</td><td>${esc(nomes[n.dep] || n.dep)}</td><td class="num">${brl(n.valor, 2)}</td><td class="quebra sub">${esc(n.desc)}</td></tr>`).join("")}</tbody></table></div>`;
-  $("#ficha").hidden = false; history.replaceState(null, "", "#forn-" + encodeURIComponent(doc));
+
+async function fichaFornecedor(doc, anoPedido) {
+  const todos = anoPedido == null && tot(), anos = todos ? E.meta.anos : [anoPedido ?? E.ano], rot = todos ? rotAno() : String(anos[0]), g = grupoForn(doc);
+  abrirFicha(`<p class="sub">Carregando…</p>`);
+  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r), G = await jsonC(`dados/${a}/forn/${g}.json`), f = G?.[doc];
+    return f ? { ano: a, F, f } : null; }));
+  const L = lotes.filter(Boolean);
+  if (!L.length) { abrirFicha(`<p class="sub">Este fornecedor não recebeu da verba em ${rot}.</p>`); return; }
+  const D = await Promise.all(anos.map(resumo)), nomes = {}; D.filter(Boolean).forEach((r) => r.deputados.forEach((x) => (nomes[x.id] = x.nome)));
+  const N = L.flatMap(({ ano, F, f }) => f.notas.map(([mes, dep, emp, cat, valor, desc]) => ({ ano, mes, dep, emp, cat, valor: valor * F, desc, doc })));
+  const info = L[L.length - 1].f, total = soma(N.map((n) => n.valor));
+  const porDep = {}; N.forEach((n) => { const o = (porDep[n.dep] = porDep[n.dep] || { v: 0, n: 0 }); o.v += n.valor; o.n++; });
+  const cats = {}; N.forEach((n) => (cats[n.cat] = (cats[n.cat] || 0) + n.valor)); const catP = Object.entries(cats).sort((a, b) => b[1] - a[1])[0];
+  abrirFicha(`<div class="d-cab"><div><h2>${esc(info.nome)}</h2><div class="sub">${etqTipo(info.tipo)} ${esc(fmtDoc(doc))}${catP ? " · " + esc(catP[0]) : ""}</div></div></div>
+    <div class="sub">Recebeu da verba de desempenho parlamentar em ${rot}${corrigir() ? " (valores de hoje)" : ""}</div>
+    <div class="d-total">${brl(total, 2)}</div><div class="sub">${porExtenso(total)}</div>
+    <div class="percentis" style="margin-top:12px"><div><b>${nf(N.length)}</b>notas</div><div><b>${nf(Object.keys(porDep).length)}</b>deputado(s)</div><div><b>${todos ? nf(L.length) : nf(new Set(N.map((n) => n.mes)).size)}</b>${todos ? "ano(s) recebendo" : "mês(es) recebendo"}</div></div>
+    <h3 class="d-sec">${todos ? "Recebido em cada ano" : "Recebido por mês em " + rot}</h3><div class="canvas-box"><canvas id="g-forn"></canvas></div>
+    <h3 class="d-sec">Por deputado</h3><div class="tabela-rolagem"><table class="ranking"><thead><tr><th>Deputado</th><th class="num">Recebido</th><th class="num">%</th><th class="num">Notas</th></tr></thead><tbody>${
+      Object.entries(porDep).sort((a, b) => b[1].v - a[1].v).map(([id, o]) => `<tr><td><a href="#" data-dep="${esc(id)}">${esc(nomes[id] || id)}</a></td><td class="num"><b>${brl(o.v)}</b></td><td class="num">${nf(100 * o.v / (total || 1), 1)}%</td><td class="num">${o.n}</td></tr>`).join("")}</tbody></table></div>
+    <h3 class="d-sec">Notas (${nf(N.length)})</h3>${tabelaNotas(N, true, nomes)}
+    <p class="dica">${info.tipo === "PF" ? "Pessoa física: o CPF aparece mascarado. " : ""}Valores negativos são anulações de empenho. Fonte: Portal da Transparência da Alece.</p>`);
+  history.replaceState(null, "", "#forn-" + encodeURIComponent(doc));
+  const serie = todos ? L.map(({ ano, F, f }) => [String(ano), soma(f.notas.map((n) => n[4])) * F])
+    : MESES.map((m, i) => [m, soma(N.filter((n) => +String(n.mes).slice(5) === i + 1).map((n) => n.valor))]);
+  grafico("g-forn", { type: "bar", data: { labels: serie.map((s) => s[0]), datasets: [{ data: serie.map((s) => s[1]), backgroundColor: "#2475B8" }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: tipBRL }, scales: { y: { ticks: { callback: (v) => curto(v) } } } } });
 }
 
 // ---------------------------------------------------------------- navegação
@@ -244,7 +290,7 @@ async function iniciar() {
   if (mf) fichaFornecedor(decodeURIComponent(mf[1]));
 }
 document.addEventListener("click", (e) => {
-  const d = e.target.closest("[data-dep]"); if (d) { e.preventDefault(); fichaDeputado(d.dataset.dep); return; }
+  const d = e.target.closest("[data-dep]"); if (d) { e.preventDefault(); fichaDeputado(d.dataset.dep, d.dataset.ano ? +d.dataset.ano : undefined); return; }
   const f = e.target.closest("[data-forn]"); if (f) { e.preventDefault(); fichaFornecedor(f.dataset.forn); return; }
   const o = e.target.closest("#d-tab th[data-ord]"); if (o) { const k = o.dataset.ord; E.ord = [k, E.ord[0] === k ? -E.ord[1] : -1]; rDeputados(); return; }
   const b = e.target.closest(".menu nav button"); if (b) irPara(b.dataset.pag);
