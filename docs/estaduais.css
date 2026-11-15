@@ -43,7 +43,7 @@ td.prev { color: #6b4fa0; }
 .extenso:empty { display: none; }
 
 details.equipe { margin: 8px 0 14px; }
-details.equipe summary { cursor: pointer; font-weight: 700; color: #1B5C93; }
+details.equipe summary { cursor: pointer; font-weight: 700; color: #2463A6; }
 
 /* aviso de coleta em andamento */
 .coleta-aviso { display: inline-flex; align-items: center; gap: 8px; margin: 4px auto 14px; padding: 6px 14px; border-radius: 999px; background: #FFF6E5; border: 1px solid #E8C27A; color: #6b4a12; font-size: 13px; }

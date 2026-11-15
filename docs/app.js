@@ -86,13 +86,13 @@ async function rInicio() {
   $("#i-top").innerHTML = top.map((d) => `<li>${foto(d)}<div><a href="#" data-dep="${esc(d.id)}">${esc(d.nome)}</a><span class="s">${esc(d.partido || "—")}</span></div><span class="v">${curto(d.total)}</span></li>`).join("");
   const cats = {}; D.forEach((d) => Object.entries(d.categorias).forEach(([k, v]) => (cats[k] = (cats[k] || 0) + v)));
   const cs = Object.entries(cats).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  grafico("g-cat", { type: "bar", data: { labels: cs.map((c) => c[0]), datasets: [{ data: cs.map((c) => c[1]), backgroundColor: "#2475B8" }] },
+  grafico("g-cat", { type: "bar", data: { labels: cs.map((c) => c[0]), datasets: [{ data: cs.map((c) => c[1]), backgroundColor: "#2463A6" }] },
     options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: tipBRL }, scales: { x: { ticks: { callback: (v) => curto(v) } } } } });
   // mês a mês: notas por mês vêm do próprio resumo (soma das categorias não tem mês); usa meta.meses para a verba e a folha média
   const anos = tot() ? E.meta.anos : [E.ano], labels = [], vf = [], vv = [];
   for (const a of anos) { const r = await resumo(a); if (!r?.por_mes) continue; const F = fatorDe(r);
     Object.entries(r.por_mes).forEach(([k, x]) => { labels.push(mesBR(k)); vf.push(x.folha * F); vv.push(x.verba * F); }); }
-  grafico("g-mes", { type: "bar", data: { labels, datasets: [{ label: "Salários (folha)", data: vf, backgroundColor: "#14283F", stack: "s" }, { label: "Verba (VDP)", data: vv, backgroundColor: "#2475B8", stack: "s" }] },
+  grafico("g-mes", { type: "bar", data: { labels, datasets: [{ label: "Salários (folha)", data: vf, backgroundColor: "#10243A", stack: "s" }, { label: "Verba (VDP)", data: vv, backgroundColor: "#2463A6", stack: "s" }] },
     options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } });
 }
 
@@ -184,8 +184,8 @@ async function fichaDeputado(id, anoPedido) {
     <div class="sub">${todos ? "Custo somado de todos os anos" : "Custo do mandato em " + rot}${corrigir() ? " (valores de hoje)" : ""}</div>
     <div class="d-total">${brl(d.total, 2)}</div>
     <div class="sub">${meses ? brl(d.total / meses) + " por mês, em média · " : ""}${porExtenso(d.total)}${d.url ? ` · <a href="${esc(d.url)}" target="_blank" rel="noopener">página oficial na Alece</a>` : ""}</div>
-    <div class="pecas"><div class="peca" style="--c:#14283F"><div class="rot">Salário (folha bruta)</div><div class="val num">${brl(d.folha)}</div></div>
-      <div class="peca" style="--c:#2475B8"><div class="rot">Verba de desempenho parlamentar</div><div class="val num">${brl(d.verba)}</div></div>
+    <div class="pecas"><div class="peca" style="--c:#10243A"><div class="rot">Salário (folha bruta)</div><div class="val num">${brl(d.folha)}</div></div>
+      <div class="peca" style="--c:#2463A6"><div class="rot">Verba de desempenho parlamentar</div><div class="val num">${brl(d.verba)}</div></div>
       ${d.prev ? `<div class="peca" style="--c:#9c2a6f"><div class="rot">Previsão até dezembro</div><div class="val num">+${brl(d.prev)}</div></div>` : ""}</div>
     <p class="sub"><button class="btn" id="card-dep" type="button">Gerar imagem para compartilhar</button></p>
     <h3 class="d-sec">${todos ? "Custo em cada ano" : "Gasto por mês em " + rot}</h3><div class="canvas-box"><canvas id="g-ficha"></canvas></div>
@@ -198,10 +198,10 @@ async function fichaDeputado(id, anoPedido) {
     <p class="dica">Valores negativos são anulações de empenho (dinheiro que voltou). Fonte: Portal da Transparência da Alece.</p>`);
   history.replaceState(null, "", "#dep-" + encodeURIComponent(id));
   if ($("#ver-notas")) $("#ver-notas").onclick = (e) => { e.target.remove(); $("#notas-box").innerHTML = tabelaNotas(N, false); };
-  if (todos) grafico("g-ficha", { type: "bar", data: { labels: porAno.map((p) => p.ano), datasets: [{ label: "Salário", data: porAno.map((p) => p.x.folha * p.F), backgroundColor: "#14283F", stack: "s" }, { label: "Verba", data: porAno.map((p) => p.x.verba * p.F), backgroundColor: "#2475B8", stack: "s" }] },
+  if (todos) grafico("g-ficha", { type: "bar", data: { labels: porAno.map((p) => p.ano), datasets: [{ label: "Salário", data: porAno.map((p) => p.x.folha * p.F), backgroundColor: "#10243A", stack: "s" }, { label: "Verba", data: porAno.map((p) => p.x.verba * p.F), backgroundColor: "#2463A6", stack: "s" }] },
     options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } });
   else { const x = porAno[0].x, F = porAno[0].F;
-    grafico("g-ficha", { type: "bar", data: { labels: MESES, datasets: [{ label: "Salário", data: (x.mensal_folha || []).map((v) => v * F), backgroundColor: "#14283F", stack: "s" }, { label: "Verba", data: (x.mensal_verba || []).map((v) => v * F), backgroundColor: "#2475B8", stack: "s" }] },
+    grafico("g-ficha", { type: "bar", data: { labels: MESES, datasets: [{ label: "Salário", data: (x.mensal_folha || []).map((v) => v * F), backgroundColor: "#10243A", stack: "s" }, { label: "Verba", data: (x.mensal_verba || []).map((v) => v * F), backgroundColor: "#2463A6", stack: "s" }] },
       options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } }); }
   $("#card-dep").onclick = () => {
     const destaques = [];
@@ -214,7 +214,7 @@ async function fichaDeputado(id, anoPedido) {
       faixa: pos ? { titulo: pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`, sub: `entre ${de} deputados estaduais do Ceará · ${todos ? "todos os anos" : "em " + rot}`, cor: caro ? "#c4161c" : "#107c41" } : null,
       valorRot: "Custou aos cofres públicos", valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
       destaques: [...(d.prev ? [[`Previsão: mais ${CartaoQC.compacto(d.prev)} até dezembro`, "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)", "#9c2a6f"]] : []), ...destaques],
-      composicao: [["Salário (folha)", d.folha, "#14283F"], ["Verba de desempenho parlamentar", d.verba, "#2475B8"]],
+      composicao: [["Salário (folha)", d.folha, "#10243A"], ["Verba de desempenho parlamentar", d.verba, "#2463A6"]],
       fonte: `Fonte: Assembleia Legislativa do Ceará${corrigir() ? " · valores corrigidos pelo IPCA" : ""} · sem a equipe do gabinete`,
       arquivo: `${semAcento(d.nome).replace(/\W+/g, "-")}-${todos ? "todos-os-anos" : rot}`,
     });
@@ -245,7 +245,7 @@ async function fichaFornecedor(doc, anoPedido) {
   history.replaceState(null, "", "#forn-" + encodeURIComponent(doc));
   const serie = todos ? L.map(({ ano, F, f }) => [String(ano), soma(f.notas.map((n) => n[4])) * F])
     : MESES.map((m, i) => [m, soma(N.filter((n) => +String(n.mes).slice(5) === i + 1).map((n) => n.valor))]);
-  grafico("g-forn", { type: "bar", data: { labels: serie.map((s) => s[0]), datasets: [{ data: serie.map((s) => s[1]), backgroundColor: "#2475B8" }] },
+  grafico("g-forn", { type: "bar", data: { labels: serie.map((s) => s[0]), datasets: [{ data: serie.map((s) => s[1]), backgroundColor: "#2463A6" }] },
     options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: tipBRL }, scales: { y: { ticks: { callback: (v) => curto(v) } } } } });
 }
 
