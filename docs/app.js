@@ -1,10 +1,10 @@
-/* Projeto Quanto Custa — Deputados estaduais (Ceará / Alece) */
+/* Projeto Quanto Custa — Deputados estaduais (um estado por vez: dados/<uf>/) */
 (() => {
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-const E = { tick: 0, meta: null, ano: null, pag: "inicio", res: {}, forn: {}, ord: ["total", -1], lim: 30, limF: 50, graf: {} };
+const E = { tick: 0, uf: "ce", estados: [], meta: null, ano: null, pag: "inicio", res: {}, forn: {}, ord: ["total", -1], lim: 30, limF: 50, graf: {} };
 const brl = (v, d = 0) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: d, maximumFractionDigits: d });
 const curto = (v) => { const a = Math.abs(v || 0);
   if (a >= 1e9) return "R$ " + (v / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + " bi";
@@ -24,6 +24,18 @@ const porExtenso = (v) => { const a = Math.abs(v || 0);
   return ""; };
 const mesBR = (k) => { const [a, m] = String(k).split("-"); return `${MESES[+m - 1]}/${a}`; };
 const tot = () => E.ano === "total";
+const base = () => `dados/${E.uf}/`;
+const M = () => E.meta || {};
+const doEstado = () => M().do_estado || "do Ceará";
+const casa = () => M().casa || "Assembleia Legislativa";
+const sigla = () => M().sigla || "Assembleia";
+const temSalario = () => M().salario !== false;
+const verbaCurta = () => M().verba_curta || "Verba (VDP)";
+const verbaNome = () => M().verba || "Verba de desempenho parlamentar";
+// posição no ranking: "mais caro" só onde o custo inclui o salário; sem folha publicada, fala do gasto da verba
+const rotPos = (pos, caro, de) => temSalario()
+  ? (pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`)
+  : (pos === 1 ? "Quem mais gastou da verba" : caro ? `${pos}º que mais gastou da verba` : `${de - pos + 1}º que menos gastou da verba`);
 const corrigir = () => $("#f-ipca").checked;
 const fatorDe = (r) => (corrigir() ? r?.fator_ipca || 1 : 1);
 const iniciais = (n) => (n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
@@ -31,7 +43,7 @@ const foto = (d, cls = "") => d.foto ? `<img class="${cls}" src="${esc(d.foto)}"
 
 async function resumo(a) {
   if (E.res[a]) return E.res[a];
-  return (E.res[a] = await getJSON(`dados/${a}/resumo.json`).catch(() => null));
+  return (E.res[a] = await getJSON(`${base()}${a}/resumo.json`).catch(() => null));
 }
 // ano escolhido ou soma de todos os anos (cada ano corrigido pelo próprio IPCA)
 async function dados() {
@@ -59,10 +71,11 @@ const ultimoMes = async () => { const r = await resumo(E.meta.anos[E.meta.anos.l
 // ---------------------------------------------------------------- início
 async function rInicio() {
   const D = (await dados()).filter(passa), T = soma(D.map((d) => d.total)), ult = await ultimoMes();
-  $("#i-rot").textContent = tot() ? `Os deputados estaduais do Ceará já custaram, de ${rotAno()},` : `Os deputados estaduais do Ceará custaram em ${E.ano}`;
+  $("#i-rot").textContent = tot() ? (temSalario() ? `Os deputados estaduais ${doEstado()} já custaram, de ${rotAno()},` : `Os deputados estaduais ${doEstado()} já gastaram da ${verbaNome().toLowerCase()}, de ${rotAno()},`)
+    : temSalario() ? `Os deputados estaduais ${doEstado()} custaram em ${E.ano}` : `Os deputados estaduais ${doEstado()} gastaram da ${verbaNome().toLowerCase()} em ${E.ano}`;
   const r = tot() ? null : E.res[E.ano], prev = r?.previsao, rest = prev ? soma(D.map((d) => d.prev || 0)) : 0;
   cancelAnimationFrame(E.tick);
-  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}Salário bruto (folha) + verba de desempenho parlamentar. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}` : ""}.`;
+  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}${temSalario() ? "Salário bruto (folha) + verba de desempenho parlamentar" : `Só a ${verbaNome().toLowerCase()}: a ${sigla()} não publica a folha de pagamento com o nome de cada deputado, por isso o salário não está somado`}. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}` : ""}.`;
   if (prev && rest > 0) {
     // corre em tempo real: do 1º dia depois da última folha publicada até 31/12, no ritmo da previsão
     const ini = new Date(r.ano, prev.ult_folha, 1).getTime(), fim = new Date(r.ano + 1, 0, 1).getTime();
@@ -78,11 +91,13 @@ async function rInicio() {
   const folha = soma(D.map((d) => d.folha)), verba = soma(D.map((d) => d.verba));
   const comVerba = D.filter((d) => d.meses_verba), mesesV = soma(comVerba.map((d) => d.meses_verba));
   kpis("#i-kpis", [...(prev && rest > 0 ? [["Previsão até dezembro", "+" + curto(rest), `${E.ano} deve fechar em ${curto(T + rest)} (estimativa)`]] : []),
-    ["Salários (folha bruta)", curto(folha), porExtenso(folha)], ["Verba (VDP)", curto(verba), porExtenso(verba)],
+    temSalario() ? ["Salários (folha bruta)", curto(folha), porExtenso(folha)]
+      : ["Salário (subsídio)", "não publicado", M().subsidio ? `por deputado; o subsídio fixado em lei é de ${brl(M().subsidio, 2)} por mês` : "a Assembleia não publica a folha nominal"],
+    [verbaCurta(), curto(verba), porExtenso(verba)],
     ["Verba média por deputado, por mês", brl(mesesV ? verba / mesesV : 0), `${comVerba.length} deputados usaram a verba`],
     ["Deputados no período", nf(D.length), "inclui suplentes que assumiram"]]);
   const top = D.slice().sort((a, b) => b.total - a.total).slice(0, 5);
-  $("#i-top-dica").textContent = rotAno();
+  $("#i-top-dica").textContent = rotAno(); $("#i-top-tit").textContent = temSalario() ? "Os 5 mais caros" : "Os 5 que mais gastaram da verba";
   $("#i-top").innerHTML = top.map((d) => `<li>${foto(d)}<div><a href="#" data-dep="${esc(d.id)}">${esc(d.nome)}</a><span class="s">${esc(d.partido || "—")}</span></div><span class="v">${curto(d.total)}</span></li>`).join("");
   const cats = {}; D.forEach((d) => Object.entries(d.categorias).forEach(([k, v]) => (cats[k] = (cats[k] || 0) + v)));
   const cs = Object.entries(cats).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
@@ -92,27 +107,27 @@ async function rInicio() {
   const anos = tot() ? E.meta.anos : [E.ano], labels = [], vf = [], vv = [];
   for (const a of anos) { const r = await resumo(a); if (!r?.por_mes) continue; const F = fatorDe(r);
     Object.entries(r.por_mes).forEach(([k, x]) => { labels.push(mesBR(k)); vf.push(x.folha * F); vv.push(x.verba * F); }); }
-  grafico("g-mes", { type: "bar", data: { labels, datasets: [{ label: "Salários (folha)", data: vf, backgroundColor: "#10243A", stack: "s" }, { label: "Verba (VDP)", data: vv, backgroundColor: "#2463A6", stack: "s" }] },
+  grafico("g-mes", { type: "bar", data: { labels, datasets: [...(temSalario() ? [{ label: "Salários (folha)", data: vf, backgroundColor: "#10243A", stack: "s" }] : []), { label: verbaCurta(), data: vv, backgroundColor: "#2463A6", stack: "s" }] },
     options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } });
 }
 
 // ---------------------------------------------------------------- ranking
-const COLS = [["total", "Custo total"], ["folha", "Salário (folha)"], ["verba", "Verba (VDP)"], ["prev", "Previsão até dez."], ["notas", "Notas"]];
+const COLS = () => [...(temSalario() ? [["total", "Custo total"], ["folha", "Salário (folha)"], ["verba", verbaCurta()]] : [["total", verbaCurta()]]), ["prev", "Previsão até dez."], ["notas", "Notas"]];
 async function rDeputados() {
   const D = (await dados()).filter(passa);
   const [k, s] = E.ord; D.sort((a, b) => (k === "nome" ? a.nome.localeCompare(b.nome) * -s : (a[k] - b[k]) * s));
-  kpis("#d-kpis", [["Deputados", nf(D.length), rotAno()], ["Custo total", curto(soma(D.map((d) => d.total))), ""],
-    ["Maior custo", D.length ? curto(Math.max(...D.map((d) => d.total))) : "—", ""], ["Mediana da verba", curto(mediana(D.map((d) => d.verba))), "por deputado no período"]]);
+  kpis("#d-kpis", [["Deputados", nf(D.length), rotAno()], [temSalario() ? "Custo total" : verbaCurta(), curto(soma(D.map((d) => d.total))), ""],
+    [temSalario() ? "Maior custo" : "Maior gasto da verba", D.length ? curto(Math.max(...D.map((d) => d.total))) : "—", ""], ["Mediana da verba", curto(mediana(D.map((d) => d.verba))), "por deputado no período"]]);
   const seta = (c) => (E.ord[0] === c ? (E.ord[1] < 0 ? " ▼" : " ▲") : "");
-  $("#d-tab").innerHTML = `<thead><tr><th>#</th><th data-ord="nome">Deputado${seta("nome")}</th>${COLS.map(([c, t]) => `<th class="num" data-ord="${c}">${t}${seta(c)}</th>`).join("")}</tr></thead><tbody>${
+  $("#d-tab").innerHTML = `<thead><tr><th>#</th><th data-ord="nome">Deputado${seta("nome")}</th>${COLS().map(([c, t]) => `<th class="num" data-ord="${c}">${t}${seta(c)}</th>`).join("")}</tr></thead><tbody>${
     D.slice(0, E.lim).map((d, i) => `<tr><td>${i + 1}</td><td><a href="#" data-dep="${esc(d.id)}">${esc(d.nome)}</a> <span class="sub">${esc(d.partido || "")}${d.atual === false ? " · fora do mandato" : ""}</span></td>
-      <td class="num"><b>${brl(d.total)}</b></td><td class="num">${brl(d.folha)}</td><td class="num">${brl(d.verba)}</td><td class="num prev">${d.prev ? "+" + brl(d.prev) : "—"}</td><td class="num">${nf(d.notas)}</td></tr>`).join("")}</tbody>`;
+      <td class="num"><b>${brl(d.total)}</b></td>${temSalario() ? `<td class="num">${brl(d.folha)}</td><td class="num">${brl(d.verba)}</td>` : ""}<td class="num prev">${d.prev ? "+" + brl(d.prev) : "—"}</td><td class="num">${nf(d.notas)}</td></tr>`).join("")}</tbody>`;
   $("#d-mais").hidden = D.length <= E.lim;
 }
 const mediana = (a) => { const s = a.filter((x) => x > 0).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 
 // ---------------------------------------------------------------- fornecedores
-async function fornecedores(a) { return (E.forn[a] = E.forn[a] || (await getJSON(`dados/${a}/fornecedores.json`).catch(() => ({ linhas: [] })))); }
+async function fornecedores(a) { return (E.forn[a] = E.forn[a] || (await getJSON(`${base()}${a}/fornecedores.json`).catch(() => ({ linhas: [] })))); }
 async function rFornecedores() {
   const anos = tot() ? E.meta.anos : [E.ano], m = new Map();
   for (const a of anos) { const r = await resumo(a), F = fatorDe(r), f = await fornecedores(a);
@@ -131,6 +146,12 @@ const fmtDoc = (d) => (/^\d{14}$/.test(d) ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d
 
 // ---------------------------------------------------------------- Assembleia
 async function rAssembleia() {
+  $("#a-dica").textContent = temSalario() ? `A folha da ${sigla()} é nominal, mas não diz em qual gabinete trabalha cada assessor parlamentar. Por isso os assessores aparecem aqui, no total da Assembleia, e não no custo de cada deputado.` : "";
+  if (!temSalario()) {
+    kpis("#a-kpis", [["Folha da Assembleia", "não publicada", "sem nomes nem totais por categoria"], ...(M().subsidio ? [["Subsídio de cada deputado", brl(M().subsidio, 2), `por mês · ${M().subsidio_lei || "fixado em lei"}`]] : [])]);
+    $("#a-tab").innerHTML = `<tbody><tr><td class="quebra">A ${esc(casa())} não publica a folha de pagamento com o nome de cada pessoa, como faz o Ceará. Publica só a tabela de salários por cargo${M().fontes?.subsidio ? ` (<a href="${esc(M().fontes.subsidio)}" target="_blank" rel="noopener">tabela dos deputados</a>)` : ""}. Por isso esta página fica sem os totais da folha neste estado.</td></tr></tbody>`;
+    return;
+  }
   const anos = tot() ? E.meta.anos : [E.ano], cats = {};
   for (const a of anos) { const r = await resumo(a), F = fatorDe(r), p = E.meta.pessoal_assembleia?.[a] || {};
     Object.entries(p).forEach(([c, x]) => { const o = (cats[c] = cats[c] || { bruta: 0, pessoas: 0 }); o.bruta += x.bruta * F; o.pessoas = Math.max(o.pessoas, x.media_pessoas); }); }
@@ -150,7 +171,7 @@ const jsonC = (u) => (cacheJ[u] = cacheJ[u] || getJSON(u).catch(() => null));
 async function notasDe(id, anos) {
   const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r);
     if (!r?.deputados.some((d) => d.id === id && d.notas > 0)) return [];
-    return ((await jsonC(`dados/${a}/notas/${encodeURIComponent(id)}.json`)) || []).map((n) => ({ ano: a, mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }));
+    return ((await jsonC(`${base()}${a}/notas/${encodeURIComponent(id)}.json`)) || []).map((n) => ({ ano: a, mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }));
   return lotes.flat();
 }
 function abrirFicha(html) { $("#ficha-corpo").innerHTML = html; $("#ficha").hidden = false; $("#ficha-corpo").scrollTop = 0; $(".ficha-caixa").scrollTop = 0; }
@@ -176,16 +197,16 @@ async function fichaDeputado(id, anoPedido) {
   const fs = Object.entries(porForn).filter(([k]) => k).sort((a, b) => b[1].v - a[1].v);
   const cats = Object.entries(d.categorias || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   const aviso = d.id === "nao-identificado" ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
-    : d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui.</p>` : "";
-  abrirFicha(`<div class="d-cab">${d.id !== "nao-identificado" ? `<img src="dados/fotos/${esc(d.id)}.jpg" data-alt="${esc(d.foto || "")}" alt="" onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else{this.style.visibility='hidden'}">` : ""}
+    : temSalario() && d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui.</p>` : "";
+  abrirFicha(`<div class="d-cab">${d.id !== "nao-identificado" ? `<img src="${base()}fotos/${esc(d.id)}.jpg" data-alt="${esc(d.foto || "")}" alt="" onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else{this.style.visibility='hidden'}">` : ""}
       <div><h2>${esc(d.nome)}</h2><div class="sub">${esc(d.partido || "")}${d.nome_completo ? " · " + esc(d.nome_completo) : ""} · ${todos ? `${porAno.length} ano(s) com dados entre ${rot}` : `${meses} ${meses === 1 ? "mês" : "meses"} com dados em ${rot}`}</div>
-        ${pos ? `<div class="selo-pos ${caro ? "" : "barato"}">${pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`} entre ${de} deputados estaduais do Ceará ${todos ? "(soma de todos os anos)" : "em " + rot}</div>` : ""}</div></div>
+        ${pos ? `<div class="selo-pos ${caro ? "" : "barato"}">${rotPos(pos, caro, de)} entre ${de} deputados estaduais ${doEstado()} ${todos ? "(soma de todos os anos)" : "em " + rot}</div>` : ""}</div></div>
     ${aviso}
-    <div class="sub">${todos ? "Custo somado de todos os anos" : "Custo do mandato em " + rot}${corrigir() ? " (valores de hoje)" : ""}</div>
+    <div class="sub">${temSalario() ? (todos ? "Custo somado de todos os anos" : "Custo do mandato em " + rot) : `${verbaNome()} usada ${todos ? "em todos os anos" : "em " + rot}`}${corrigir() ? " (valores de hoje)" : ""}</div>
     <div class="d-total">${brl(d.total, 2)}</div>
-    <div class="sub">${meses ? brl(d.total / meses) + " por mês, em média · " : ""}${porExtenso(d.total)}${d.url ? ` · <a href="${esc(d.url)}" target="_blank" rel="noopener">página oficial na Alece</a>` : ""}</div>
-    <div class="pecas"><div class="peca" style="--c:#10243A"><div class="rot">Salário (folha bruta)</div><div class="val num">${brl(d.folha)}</div></div>
-      <div class="peca" style="--c:#2463A6"><div class="rot">Verba de desempenho parlamentar</div><div class="val num">${brl(d.verba)}</div></div>
+    <div class="sub">${meses ? brl(d.total / meses) + " por mês, em média · " : ""}${porExtenso(d.total)}${d.url ? ` · <a href="${esc(d.url)}" target="_blank" rel="noopener">página oficial na ${esc(sigla())}</a>` : ""}</div>
+    <div class="pecas"><div class="peca" style="--c:#10243A"><div class="rot">${temSalario() ? "Salário (folha bruta)" : "Salário (subsídio)"}</div><div class="val num">${temSalario() ? brl(d.folha) : "não publicado"}</div>${temSalario() || !M().subsidio ? "" : `<div class="sub">fixado em lei: ${brl(M().subsidio, 2)} por mês; fora do total</div>`}</div>
+      <div class="peca" style="--c:#2463A6"><div class="rot">${esc(verbaNome())}</div><div class="val num">${brl(d.verba)}</div></div>
       ${d.prev ? `<div class="peca" style="--c:#9c2a6f"><div class="rot">Previsão até dezembro</div><div class="val num">+${brl(d.prev)}</div></div>` : ""}</div>
     <p class="sub"><button class="btn" id="card-dep" type="button">Gerar imagem para compartilhar</button></p>
     <h3 class="d-sec">${todos ? "Custo em cada ano" : "Gasto por mês em " + rot}</h3><div class="canvas-box"><canvas id="g-ficha"></canvas></div>
@@ -195,27 +216,27 @@ async function fichaDeputado(id, anoPedido) {
       <div><h3 class="d-sec">Quem mais recebeu</h3><table class="ranking">${fs.slice(0, 10).map(([doc, f]) => `<tr><td class="quebra"><a href="#" data-forn="${esc(doc)}">${esc(f.nome)}</a><div class="sub">${esc(fmtDoc(doc))}</div></td><td class="num">${brl(f.v)}</td></tr>`).join("") || "<tr><td>—</td></tr>"}</table></div></div>
     <h3 class="d-sec">Todas as notas da verba (${nf(N.length)})</h3>
     ${N.length > 200 ? `<p class="sub"><button class="btn-sec" id="ver-notas" type="button">Mostrar as ${nf(N.length)} notas</button></p><div id="notas-box"></div>` : tabelaNotas(N, false)}
-    <p class="dica">Valores negativos são anulações de empenho (dinheiro que voltou). Fonte: Portal da Transparência da Alece.</p>`);
+    <p class="dica">${temSalario() ? "Valores negativos são anulações de empenho (dinheiro que voltou)." : "Valores já descontada a glosa (parte da nota recusada pela Assembleia)."} Fonte: ${esc(casa())}.</p>`);
   history.replaceState(null, "", "#dep-" + encodeURIComponent(id));
   if ($("#ver-notas")) $("#ver-notas").onclick = (e) => { e.target.remove(); $("#notas-box").innerHTML = tabelaNotas(N, false); };
-  if (todos) grafico("g-ficha", { type: "bar", data: { labels: porAno.map((p) => p.ano), datasets: [{ label: "Salário", data: porAno.map((p) => p.x.folha * p.F), backgroundColor: "#10243A", stack: "s" }, { label: "Verba", data: porAno.map((p) => p.x.verba * p.F), backgroundColor: "#2463A6", stack: "s" }] },
+  if (todos) grafico("g-ficha", { type: "bar", data: { labels: porAno.map((p) => p.ano), datasets: [...(temSalario() ? [{ label: "Salário", data: porAno.map((p) => p.x.folha * p.F), backgroundColor: "#10243A", stack: "s" }] : []), { label: "Verba", data: porAno.map((p) => p.x.verba * p.F), backgroundColor: "#2463A6", stack: "s" }] },
     options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } });
   else { const x = porAno[0].x, F = porAno[0].F;
-    grafico("g-ficha", { type: "bar", data: { labels: MESES, datasets: [{ label: "Salário", data: (x.mensal_folha || []).map((v) => v * F), backgroundColor: "#10243A", stack: "s" }, { label: "Verba", data: (x.mensal_verba || []).map((v) => v * F), backgroundColor: "#2463A6", stack: "s" }] },
+    grafico("g-ficha", { type: "bar", data: { labels: MESES, datasets: [...(temSalario() ? [{ label: "Salário", data: (x.mensal_folha || []).map((v) => v * F), backgroundColor: "#10243A", stack: "s" }] : []), { label: "Verba", data: (x.mensal_verba || []).map((v) => v * F), backgroundColor: "#2463A6", stack: "s" }] },
       options: { maintainAspectRatio: false, plugins: { tooltip: tipBRL }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: (v) => curto(v) } } } } }); }
   $("#card-dep").onclick = () => {
     const destaques = [];
     if (fs[0]) destaques.push([`Quem mais recebeu da verba: ${fs[0][1].nome}`, `${brl(fs[0][1].v)} · ${fmtDoc(fs[0][0])}`, "#118dff"]);
     if (cats[0]) destaques.push([`Maior gasto da verba: ${cats[0][0]}`, brl(cats[0][1]), "#107c41"]);
     CartaoQC.abrir({
-      titulo: `${todos ? `Custo de todos os anos (${rot})` : `Custo do mandato em ${rot}`} · Deputado estadual`,
-      nome: d.nome, foto: d.id !== "nao-identificado" ? `dados/fotos/${d.id}.jpg` : "", semFoto: d.id === "nao-identificado",
-      linhas: [[d.partido, "Assembleia Legislativa do Ceará"].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${todos ? "" : " em " + rot}` : ""],
-      faixa: pos ? { titulo: pos === 1 ? "Deputado estadual mais caro" : caro ? `${pos}º mais caro` : `${de - pos + 1}º mais econômico`, sub: `entre ${de} deputados estaduais do Ceará · ${todos ? "todos os anos" : "em " + rot}`, cor: caro ? "#c4161c" : "#107c41" } : null,
-      valorRot: "Custou aos cofres públicos", valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
-      destaques: [...(d.prev ? [[`Previsão: mais ${CartaoQC.compacto(d.prev)} até dezembro`, "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)", "#9c2a6f"]] : []), ...destaques],
-      composicao: [["Salário (folha)", d.folha, "#10243A"], ["Verba de desempenho parlamentar", d.verba, "#2463A6"]],
-      fonte: `Fonte: Assembleia Legislativa do Ceará${corrigir() ? " · valores corrigidos pelo IPCA" : ""} · sem a equipe do gabinete`,
+      titulo: `${temSalario() ? (todos ? `Custo de todos os anos (${rot})` : `Custo do mandato em ${rot}`) : `${verbaNome()} ${todos ? `(${rot})` : `em ${rot}`}`} · Deputado estadual`,
+      nome: d.nome, foto: d.id !== "nao-identificado" ? `${base()}fotos/${d.id}.jpg` : "", semFoto: d.id === "nao-identificado",
+      linhas: [[d.partido, casa()].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${todos ? "" : " em " + rot}` : ""],
+      faixa: pos ? { titulo: rotPos(pos, caro, de), sub: `entre ${de} deputados estaduais ${doEstado()} · ${todos ? "todos os anos" : "em " + rot}`, cor: caro ? "#c4161c" : "#107c41" } : null,
+      valorRot: temSalario() ? "Custou aos cofres públicos" : `Gastou da ${verbaNome().toLowerCase()}`, valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
+      destaques: [...(d.prev ? [[`Previsão: mais ${CartaoQC.compacto(d.prev)} até dezembro`, temSalario() ? "salário dos meses que faltam, 13º e verba no ritmo do ano (estimativa)" : "verba no ritmo do ano (estimativa)", "#9c2a6f"]] : []), ...destaques],
+      composicao: temSalario() ? [["Salário (folha)", d.folha, "#10243A"], [verbaNome(), d.verba, "#2463A6"]] : [[verbaNome(), d.verba, "#2463A6"]],
+      fonte: `Fonte: ${casa()}${corrigir() ? " · valores corrigidos pelo IPCA" : ""} · ${temSalario() ? "sem a equipe do gabinete" : "só a verba: salário não publicado"}`,
       arquivo: `${semAcento(d.nome).replace(/\W+/g, "-")}-${todos ? "todos-os-anos" : rot}`,
     });
   };
@@ -224,7 +245,7 @@ async function fichaDeputado(id, anoPedido) {
 async function fichaFornecedor(doc, anoPedido) {
   const todos = anoPedido == null && tot(), anos = todos ? E.meta.anos : [anoPedido ?? E.ano], rot = todos ? rotAno() : String(anos[0]), g = grupoForn(doc);
   abrirFicha(`<p class="sub">Carregando…</p>`);
-  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r), G = await jsonC(`dados/${a}/forn/${g}.json`), f = G?.[doc];
+  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r), G = await jsonC(`${base()}${a}/forn/${g}.json`), f = G?.[doc];
     return f ? { ano: a, F, f } : null; }));
   const L = lotes.filter(Boolean);
   if (!L.length) { abrirFicha(`<p class="sub">Este fornecedor não recebeu da verba em ${rot}.</p>`); return; }
@@ -234,14 +255,14 @@ async function fichaFornecedor(doc, anoPedido) {
   const porDep = {}; N.forEach((n) => { const o = (porDep[n.dep] = porDep[n.dep] || { v: 0, n: 0 }); o.v += n.valor; o.n++; });
   const cats = {}; N.forEach((n) => (cats[n.cat] = (cats[n.cat] || 0) + n.valor)); const catP = Object.entries(cats).sort((a, b) => b[1] - a[1])[0];
   abrirFicha(`<div class="d-cab"><div><h2>${esc(info.nome)}</h2><div class="sub">${etqTipo(info.tipo)} ${esc(fmtDoc(doc))}${catP ? " · " + esc(catP[0]) : ""}</div></div></div>
-    <div class="sub">Recebeu da verba de desempenho parlamentar em ${rot}${corrigir() ? " (valores de hoje)" : ""}</div>
+    <div class="sub">Recebeu da ${esc(verbaNome().toLowerCase())} em ${rot}${corrigir() ? " (valores de hoje)" : ""}</div>
     <div class="d-total">${brl(total, 2)}</div><div class="sub">${porExtenso(total)}</div>
     <div class="percentis" style="margin-top:12px"><div><b>${nf(N.length)}</b>notas</div><div><b>${nf(Object.keys(porDep).length)}</b>deputado(s)</div><div><b>${todos ? nf(L.length) : nf(new Set(N.map((n) => n.mes)).size)}</b>${todos ? "ano(s) recebendo" : "mês(es) recebendo"}</div></div>
     <h3 class="d-sec">${todos ? "Recebido em cada ano" : "Recebido por mês em " + rot}</h3><div class="canvas-box"><canvas id="g-forn"></canvas></div>
     <h3 class="d-sec">Por deputado</h3><div class="tabela-rolagem"><table class="ranking"><thead><tr><th>Deputado</th><th class="num">Recebido</th><th class="num">%</th><th class="num">Notas</th></tr></thead><tbody>${
       Object.entries(porDep).sort((a, b) => b[1].v - a[1].v).map(([id, o]) => `<tr><td><a href="#" data-dep="${esc(id)}">${esc(nomes[id] || id)}</a></td><td class="num"><b>${brl(o.v)}</b></td><td class="num">${nf(100 * o.v / (total || 1), 1)}%</td><td class="num">${o.n}</td></tr>`).join("")}</tbody></table></div>
     <h3 class="d-sec">Notas (${nf(N.length)})</h3>${tabelaNotas(N, true, nomes)}
-    <p class="dica">${info.tipo === "PF" ? "Pessoa física: o CPF aparece mascarado. " : ""}Valores negativos são anulações de empenho. Fonte: Portal da Transparência da Alece.</p>`);
+    <p class="dica">${info.tipo === "PF" ? "Pessoa física: o CPF aparece mascarado. " : ""}${temSalario() ? "Valores negativos são anulações de empenho." : "Valores já descontada a glosa."} Fonte: ${esc(casa())}.</p>`);
   history.replaceState(null, "", "#forn-" + encodeURIComponent(doc));
   const serie = todos ? L.map(({ ano, F, f }) => [String(ano), soma(f.notas.map((n) => n[4])) * F])
     : MESES.map((m, i) => [m, soma(N.filter((n) => +String(n.mes).slice(5) === i + 1).map((n) => n.valor))]);
@@ -259,26 +280,48 @@ async function rMetodo() {
   const vazios = Object.entries(M).filter(([, x]) => !x.verba).map(([k]) => mesBR(k));
   const semCasar = Object.entries(E.meta?.sem_casar || {}).filter(([, l]) => l.length).map(([a, l]) => `${a}: ${l.map((x) => `“${x}”`).join(", ")}`);
   const soVerba = [];
-  for (const a of E.meta?.anos || []) { const r = await resumo(a); (r?.deputados || []).forEach((d) => { if (d.verba > 0 && !d.folha && d.id !== "nao-identificado") soVerba.push(`${d.nome} (${a})`); }); }
-  $("#m-recusadas").innerHTML = `<b>Divergências encontradas nos dados da Assembleia</b> (avisamos sempre que a informação falta ou não fecha):<ul>
+  for (const a of temSalario() ? E.meta?.anos || [] : []) { const r = await resumo(a); (r?.deputados || []).forEach((d) => { if (d.verba > 0 && !d.folha && d.id !== "nao-identificado") soVerba.push(`${d.nome} (${a})`); }); }
+  $$("[data-uf-texto]").forEach((el) => (el.hidden = el.dataset.ufTexto !== E.uf));
+  const semDet = await semFornecedor();
+  $("#m-recusadas").innerHTML = `<b>Divergências encontradas nos dados da ${esc(casa())}</b> (avisamos sempre que a informação falta ou não fecha):<ul>
     <li>${nf(n)} linha(s) do arquivo da verba não eram de um deputado e ficaram de fora (${brl(v, 2)}), em ${nf(rec.length)} mês(es) baixados.</li>
     ${semCasar.length ? `<li>Nomes na planilha da verba que não são de nenhum deputado identificável, somados em “Nome não identificado na planilha”: ${esc(semCasar.join(" · "))}.</li>` : ""}
     ${soVerba.length ? `<li>Aparecem na verba com um nome que não encontramos na folha de pagamento, por isso sem salário ligado: ${esc(soVerba.join(", "))}.</li>` : ""}
+    ${semDet ? `<li>${nf(semDet)} nota(s) ainda sem o fornecedor: o robô busca o detalhe de cada nota aos poucos, para não sobrecarregar o site da Assembleia. O valor já está somado.</li>` : ""}
     ${vazios.length ? `<li>Meses ainda sem notas da verba publicadas pela Assembleia: ${esc(vazios.join(", "))}.</li>` : ""}</ul>`;
+}
+async function semFornecedor() {
+  if (temSalario()) return 0;
+  return soma(await Promise.all((E.meta?.anos || []).map(async (a) => (await resumo(a))?.sem_fornecedor || 0)));
 }
 function irPara(p) {
   E.pag = p; $$(".pagina").forEach((s) => s.classList.toggle("ativa", s.dataset.pag === p));
   $$(".menu nav button").forEach((b) => (b.dataset.pag === p ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
   $("#menu").classList.remove("aberto"); $("#veu").hidden = true;
-  const u = new URL(location); u.searchParams.set("ano", E.ano); u.hash = p; history.replaceState(null, "", u);
+  const u = new URL(location); u.searchParams.set("uf", E.uf); u.searchParams.set("ano", E.ano); u.hash = p; history.replaceState(null, "", u);
   render(); window.scrollTo(0, 0);
 }
 async function iniciar() {
-  try { E.meta = await getJSON("dados/meta.json"); } catch { $("#aviso").hidden = false; $("#aviso").textContent = "Os dados ainda estão sendo coletados pelo robô. Volte em algumas horas."; irPara("metodo"); return; }
+  const est = await getJSON("dados/estados.json").catch(() => null);
+  E.estados = est?.estados?.length ? est.estados : [{ id: "ce", estado: "Ceará" }];
+  const pedidoUF = new URL(location).searchParams.get("uf");
+  let lembrado = null; try { lembrado = localStorage.getItem("qc-estaduais-uf"); } catch (e) { /* sem armazenamento */ }
+  E.uf = [pedidoUF, lembrado].find((u) => u && E.estados.some((e) => e.id === u)) || E.estados[0].id;
+  $("#f-uf").innerHTML = E.estados.map((e) => `<option value="${esc(e.id)}">${esc(e.estado)}</option>`).join("");
+  $("#f-uf").value = E.uf;
+  $("#estados-lista").textContent = E.estados.map((e) => e.estado).join(" e ").replace(/ e (?=.* e )/g, ", ");
+  await carregarEstado();
+}
+async function carregarEstado() {
+  E.res = {}; E.forn = {}; E.meta = null;
+  try { E.meta = await getJSON(`${base()}meta.json`); } catch { $("#aviso").hidden = false; $("#aviso").textContent = "Os dados ainda estão sendo coletados pelo robô. Volte em algumas horas."; irPara("metodo"); return; }
   const anos = E.meta.anos.slice().reverse();
   const pedido = new URL(location).searchParams.get("ano");
   E.ano = pedido && (pedido === "total" || anos.includes(+pedido)) ? (pedido === "total" ? "total" : +pedido) : anos[0];
-  $("#f-ano").innerHTML = `<option value="total">Todos os anos (desde 2023)</option>` + anos.map((a) => `<option value="${a}">${a}</option>`).join("");
+  $("#limite-anos").innerHTML = `<b>${esc(E.meta.estado || "")}:</b> ${esc(E.meta.limite || "")}`;
+  $("#g-cat-tit").textContent = `Para onde vai a ${verbaCurta().toLowerCase().replace("verba (vdp)", "verba (VDP)")}`;
+  $("#g-mes-dica").textContent = temSalario() ? "salário (folha) e verba (VDP) de todos os deputados" : `${verbaNome().toLowerCase()} de todos os deputados (a ${sigla()} não publica a folha nominal)`;
+  $("#f-ano").innerHTML = `<option value="total">Todos os anos (desde ${E.meta.desde || E.meta.anos[0]})</option>` + anos.map((a) => `<option value="${a}">${a}</option>`).join("");
   $("#f-ano").value = E.ano;
   if (E.meta.ipca?.referencia) $("#ipca-ref").textContent = `IPCA até ${E.meta.ipca.referencia}`;
   $("#atualizado").textContent = `Atualizado em ${new Date(E.meta.gerado_em).toLocaleString("pt-BR")}`;
@@ -295,6 +338,8 @@ document.addEventListener("click", (e) => {
   const o = e.target.closest("#d-tab th[data-ord]"); if (o) { const k = o.dataset.ord; E.ord = [k, E.ord[0] === k ? -E.ord[1] : -1]; rDeputados(); return; }
   const b = e.target.closest(".menu nav button"); if (b) irPara(b.dataset.pag);
 });
+$("#f-uf").onchange = async (e) => { E.uf = e.target.value; try { localStorage.setItem("qc-estaduais-uf", E.uf); } catch (x) { /* sem armazenamento */ }
+  $("#ficha").hidden = true; history.replaceState(null, "", location.pathname + "?uf=" + E.uf + "#" + E.pag); $("#f-busca").value = ""; await carregarEstado(); };
 $("#f-ano").onchange = (e) => { E.ano = e.target.value === "total" ? "total" : +e.target.value; irPara(E.pag); };
 ["#f-partido", "#f-ipca"].forEach((k) => ($(k).onchange = () => { E.lim = 30; E.limF = 50; render(); }));
 $("#f-busca").oninput = () => { E.lim = 30; render(); };

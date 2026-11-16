@@ -1,7 +1,7 @@
 # Projeto Quanto Custa — Deputados estaduais
 
 Quanto custa cada deputado estadual: salário bruto (folha de pagamento nominal) e verba de gabinete,
-nota a nota, com fornecedores e valores corrigidos pela inflação. Começa pelo **Ceará** (Assembleia
+nota a nota, com fornecedores e valores corrigidos pela inflação. Já tem o **Ceará** (Alece) e a **Bahia** (ALBA, só a verba: a folha nominal não é publicada). Começou pelo Ceará (Assembleia
 Legislativa do Ceará — Alece). Endereço: https://quantocustaum.com/quanto-custa-deputados-estaduais/
 
 ## Como funciona

@@ -1,7 +1,7 @@
 """Projeto Quanto Custa — Deputados estaduais (configuração).
 
-Começa pelo Ceará (Assembleia Legislativa do Ceará — Alece). Outros estados entram
-como novas entradas em ASSEMBLEIAS, cada uma com o seu módulo em coletor/.
+Um estado por vez. Cada Assembleia tem a sua entrada em CASAS (abaixo) e o seu módulo em
+coletor/ (Ceará: alece.py; Bahia: alba.py). O site lê docs/dados/<uf>/ de cada estado.
 """
 
 USER_AGENT = "ProjetoQuantoCusta/1.0 (painel de transparencia com dados abertos)"
@@ -14,6 +14,8 @@ ANO_INICIAL = 2023
 
 # Meses já fechados há mais que isso não são baixados de novo (a fonte quase não muda).
 MESES_REBAIXAR = 3
+# Bahia: notas de um mês continuam sendo lançadas por muitos meses depois; a lista é refeita por mais tempo.
+MESES_REBAIXAR_BA = 12
 
 IPCA_SGS = ("https://api.bcb.gov.br/dados/serie/bcdata.sgs.433/dados"
             "?formato=json&dataInicial=01/01/{ano}")
@@ -56,3 +58,66 @@ CATEGORIAS_VDP = [
     ("Saúde (plano)", r"SAUDE|PLANO DE ASSISTENCIA|ODONTO"),
     ("Reembolso de despesas", r"REEMBOLSO"),
 ]
+
+
+# --- Bahia (ALBA) ---
+# Sem robots.txt no site (resposta 404): nenhuma restrição. A lista mensal tem 20 notas por página
+# (a página começa em 0) e cada nota tem uma página de detalhe com CPF/CNPJ, fornecedor e glosa.
+# A ALBA não publica a folha de pagamento nominal: só o subsídio fixado em lei.
+ALBA = {
+    "uf": "BA",
+    "nome": "Assembleia Legislativa da Bahia",
+    "sigla": "ALBA",
+    "lista_mes": "https://www.al.ba.gov.br/transparencia/verbas-idenizatorias?ano={ano}&mes={mes}&page={pagina}&size=20",
+    "detalhe": "https://www.al.ba.gov.br/transparencia/verbas-idenizatorias/{id}/",
+    "verba_pagina": "https://www.al.ba.gov.br/transparencia/verbas-idenizatorias",
+    "legislatura": "https://www.al.ba.gov.br/deputados/legislatura-atual",
+    "em_exercicio": "https://www.al.ba.gov.br/deputados/deputados-estaduais",
+    "perfil": "https://www.al.ba.gov.br/deputados/deputado-legislatura-atual/{codigo}",
+    "site": "https://www.al.ba.gov.br",
+    "subsidio_pdf": "https://portalrh.alba.ba.gov.br/pdf/transparencia/ALBA_ECV_Deputados.pdf",
+}
+
+# Categorias da verba da ALBA (nome oficial, sem acentos, em maiúsculas -> nome curto). A primeira que casar vale.
+CATEGORIAS_ALBA = [
+    ("Aluguel de imóvel / escritório", r"ALUGUEL"),
+    ("Material de expediente", r"MATERIAL DE EXPEDIENTE"),
+    ("Software, internet, telefone e correios", r"SOFTWARE|INTERNET|TELEFONE|POSTAIS"),
+    ("Divulgação em redes sociais", r"DIVULGACAO.*REDES SOCIAIS"),
+    ("Divulgação do mandato", r"DIVULGACAO"),
+    ("Fretamento", r"FRETAMENTO"),
+    ("Cursos e eventos (inscrições)", r"INSCRIC"),
+    ("Locação de veículos", r"LOCACAO DE VEICULO"),
+    ("Locomoção e hospedagem", r"LOCOMOCAO|HOSPEDAGEM"),
+    ("Consultoria e assessoria", r"CONSULTORIAS\s+ASSESSORIAS"),
+    ("Assessorias", r"^ASSESSORIA"),
+    ("Consultorias", r"^CONSULTORIA"),
+    ("Pesquisas", r"^PESQUISA"),
+    ("Trabalhos técnicos", r"TRABALHOS TECNICOS"),
+]
+
+# Estados publicados no site (ordem do seletor). "limite" explica por que os dados começam no ano "desde".
+CASAS = {
+    "ce": {
+        "uf": "CE", "estado": "Ceará", "do_estado": "do Ceará", "nome": ALECE["nome"], "sigla": "Alece", "vagas": 46,
+        "desde": 2023, "salario": True,
+        "verba": "Verba de desempenho parlamentar", "verba_curta": "Verba (VDP)",
+        "perfil": ALECE["perfil"],
+        "fontes": {"verba": ALECE["vdp_pagina"], "folha": ALECE["folha_pagina"], "deputados": ALECE["lista_deputados"]},
+        "limite": ("Dados desde janeiro de 2023, início da legislatura atual. Os anos anteriores ficaram de fora porque, "
+                   "no sistema antigo da Assembleia, o arquivo da verba mistura aposentadorias, pensões e empenhos anuais "
+                   "globais nas linhas dos deputados. Com isso, não dá para separar com segurança o que foi gasto de cada "
+                   "deputado, e preferimos não publicar números que não conseguimos conferir."),
+    },
+    "ba": {
+        "uf": "BA", "estado": "Bahia", "do_estado": "da Bahia", "nome": ALBA["nome"], "sigla": "ALBA", "vagas": 63,
+        "desde": 2023, "salario": False, "subsidio": 34774.64, "subsidio_lei": "Lei estadual nº 14.532, de 16/01/2023",
+        "verba": "Verba indenizatória", "verba_curta": "Verba indenizatória",
+        "perfil": ALBA["perfil"],
+        "fontes": {"verba": ALBA["verba_pagina"], "deputados": ALBA["legislatura"], "subsidio": ALBA["subsidio_pdf"]},
+        "limite": ("Dados desde janeiro de 2023, início da legislatura atual, para comparar com os outros estados no mesmo "
+                   "período. A Assembleia da Bahia não publica a folha de pagamento com o nome de cada deputado, só o "
+                   "subsídio fixado em lei (hoje, R$ 34.774,64 por mês). Por isso, na Bahia, o custo mostrado é só o da verba "
+                   "indenizatória, sem o salário."),
+    },
+}

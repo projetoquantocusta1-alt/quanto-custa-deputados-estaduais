@@ -44,6 +44,7 @@
     <a class="hub-link topo" href="https://quantocustaum.com/">← Início</a>
   </header>
   <section class="segmentacoes" aria-label="Filtros">
+    <label>Estado<select id="f-uf"></select></label>
     <label>Ano<select id="f-ano"></select></label>
     <label>Partido<select id="f-partido"><option value="">Todos</option></select></label>
     <label class="busca">Deputado<input id="f-busca" type="search" placeholder="Nome do deputado estadual" autocomplete="off"></label>
@@ -58,8 +59,8 @@
         <p class="selo">Transparência independente · dados oficiais das Assembleias Legislativas</p>
         <h1>Quanto custa um deputado estadual?</h1>
         <p class="hero-sub">Veja quanto cada deputado estadual custa em salário e na verba de gabinete, nota a nota.</p>
-        <p class="coleta-aviso"><span class="vis-ponto" aria-hidden="true"></span>Os dados estão sendo coletados estado por estado. <b>Por enquanto: Ceará</b> (Assembleia Legislativa, 46 vagas).</p>
-        <p class="limite-anos"><b>Ceará: dados desde janeiro de 2023</b>, início da legislatura atual. Os anos anteriores ficaram de fora porque, no sistema antigo da Assembleia, o arquivo da verba mistura aposentadorias, pensões e empenhos anuais globais nas linhas dos deputados. Com isso, não dá para separar com segurança o que foi gasto de cada deputado, e preferimos não publicar números que não conseguimos conferir.</p>
+        <p class="coleta-aviso"><span class="vis-ponto" aria-hidden="true"></span><span>Os dados estão sendo coletados estado por estado. <b>Por enquanto: <span id="estados-lista">Ceará</span></b>. Escolha o estado no alto da página.</span></p>
+        <p class="limite-anos" id="limite-anos"></p>
         <p class="destaque-rot" id="i-rot"></p>
         <div class="destaque-valor" id="i-total">—</div>
         <p class="extenso" id="i-ext"></p>
@@ -67,9 +68,9 @@
       </div>
       <div class="kpis" id="i-kpis"></div>
       <div class="grade">
-        <article class="visual span-5"><header><h2>Os 5 mais caros</h2><span class="dica" id="i-top-dica"></span></header><ol class="top5" id="i-top"></ol></article>
-        <article class="visual span-7"><header><h2>Para onde vai a verba (VDP)</h2></header><div class="canvas-box alto"><canvas id="g-cat"></canvas></div></article>
-        <article class="visual span-12"><header><h2>Mês a mês</h2><span class="dica">salário (folha) e verba (VDP) de todos os deputados</span></header><div class="canvas-box"><canvas id="g-mes"></canvas></div></article>
+        <article class="visual span-5"><header><h2 id="i-top-tit">Os 5 mais caros</h2><span class="dica" id="i-top-dica"></span></header><ol class="top5" id="i-top"></ol></article>
+        <article class="visual span-7"><header><h2 id="g-cat-tit">Para onde vai a verba</h2></header><div class="canvas-box alto"><canvas id="g-cat"></canvas></div></article>
+        <article class="visual span-12"><header><h2>Mês a mês</h2><span class="dica" id="g-mes-dica"></span></header><div class="canvas-box"><canvas id="g-mes"></canvas></div></article>
       </div>
     </section>
 
@@ -93,11 +94,12 @@
       <div class="kpis" id="a-kpis"></div>
       <article class="visual"><header><h2>Folha de pagamento da Assembleia, por categoria</h2><span class="dica">remuneração bruta no ano, todas as pessoas da categoria</span></header>
         <div class="tabela-rolagem"><table class="ranking" id="a-tab"></table></div>
-        <p class="dica">A folha da Alece é nominal, mas não diz em qual gabinete trabalha cada assessor parlamentar. Por isso os assessores aparecem aqui, no total da Assembleia, e não no custo de cada deputado.</p></article>
+        <p class="dica" id="a-dica"></p></article>
     </section>
 
     <section class="pagina texto" data-pag="metodo">
       <article class="visual">
+        <div data-uf-texto="ce">
         <h2>De onde vêm os dados</h2>
         <ul>
           <li><b>Verba de desempenho parlamentar (VDP)</b>: arquivo mensal do <a href="https://transparencia.al.ce.gov.br/despesas/verba-desempenho-parlamentar" target="_blank" rel="noopener">Portal da Transparência da Alece</a>, empenho a empenho, com credor e CNPJ. Valores negativos são anulações e já são descontados.</li>
@@ -110,6 +112,22 @@
         <p><b>Desde 2023</b>: a legislatura atual começou em fevereiro de 2023. O arquivo da verba dos anos anteriores (sistema antigo da Assembleia) mistura folhas de aposentadoria e pensão e empenhos anuais globais nas linhas dos deputados; preferimos não publicar números que não conseguimos conferir. Linhas que não são de um deputado são deixadas de fora e contadas em “linhas recusadas”.</p>
         <p><b>Ligação entre a folha e a verba</b>: a folha usa o nome completo e a verba usa o nome parlamentar. A ligação é feita pelo cadastro do site da Alece (nome parlamentar ↔ nome completo) ou, se faltar, quando todas as palavras do nome parlamentar estão em um único nome completo da folha. Quem não casar aparece separado, pelo nome.</p>
         <p><b>Previsão até dezembro</b> (estimativa): para quem estava na folha do último mês publicado, o último salário bruto × meses que faltam, mais o 13º se ainda não foi pago; e a verba no ritmo médio mensal dos meses fechados (o último mês publicado costuma vir incompleto). O número grande da página inicial avança em tempo real nesse ritmo.</p>
+        </div>
+        <div data-uf-texto="ba" hidden>
+        <h2>De onde vêm os dados</h2>
+        <ul>
+          <li><b>Verba indenizatória</b>: lista mensal do <a href="https://www.al.ba.gov.br/transparencia/verbas-idenizatorias" target="_blank" rel="noopener">Portal da Transparência da ALBA</a>, nota a nota. O CPF ou CNPJ e o nome do fornecedor vêm da página de detalhe de cada nota, que o robô busca aos poucos (uma por segundo) para não sobrecarregar o site da Assembleia.</li>
+          <li><b>Glosa</b>: quando a Assembleia recusa parte de uma nota, esse valor (a glosa) é descontado; contamos só o que foi aceito.</li>
+          <li><b>Salário</b>: a ALBA <b>não publica a folha de pagamento com o nome de cada deputado</b>, só a <a href="https://portalrh.alba.ba.gov.br/pdf/transparencia/ALBA_ECV_Deputados.pdf" target="_blank" rel="noopener">tabela do subsídio</a> fixado em lei (hoje, R$ 34.774,64 por mês). Como não dá para conferir quanto cada um recebeu de fato, o salário não entra no custo dos deputados da Bahia.</li>
+          <li><b>Deputados</b>: nome, partido e foto vêm do <a href="https://www.al.ba.gov.br/deputados/legislatura-atual" target="_blank" rel="noopener">site da ALBA</a> (deputados desta legislatura, inclusive suplentes que assumiram).</li>
+          <li><b>IPCA</b>: Banco Central, para trazer valores antigos para preços de hoje.</li>
+        </ul>
+        <h2>O que entra no custo</h2>
+        <p><b>Só a verba indenizatória</b>. Sem o salário (não publicado) e sem a equipe do gabinete. Por isso o custo de cada deputado da Bahia é um <b>piso</b> e <b>não deve ser comparado diretamente</b> com o do Ceará, que soma o salário.</p>
+        <p><b>Desde 2023</b>: início da legislatura atual, o mesmo período dos outros estados.</p>
+        <p><b>Mês da nota</b>: usamos a competência (o mês a que a despesa se refere). A Assembleia continua lançando notas de um mês por muito tempo depois; por isso o robô refaz a lista dos últimos 12 meses todos os dias, e os meses recentes ainda podem crescer.</p>
+        <p><b>Previsão até dezembro</b> (estimativa): só a verba, no ritmo médio mensal do ano, para quem usou a verba nos últimos meses.</p>
+        </div>
         <p>CPF de pessoas físicas aparece mascarado (***.456.789-**).</p>
         <div id="m-recusadas"></div>
       </article>
@@ -125,7 +143,7 @@
 <script src="vendor/chart.umd.js"></script>
 <script src="boasvindas.js?v=1" data-site="e"></script>
 <script src="cartao.js?v=5"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 <!-- contador de visitas sem cookies e sem dados pessoais (GoatCounter) -->
 <script data-goatcounter="https://quantocustaum.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 <script>/* número de visitas: selo no topo (ou no rodapé, se a página não tiver selo); some se o GoatCounter não responder */

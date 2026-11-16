@@ -1,17 +1,22 @@
-"""Robô dos deputados estaduais (Ceará / Alece).
+"""Robô dos deputados estaduais (um estado por vez: Ceará / Alece, Bahia / ALBA).
 
 Uso:
-    python atualizar.py                 # baixa o que falta e monta o site
+    python atualizar.py                 # baixa o que falta e monta o site, todos os estados
+    python atualizar.py --uf ba         # só um estado
     python atualizar.py --so-montar     # só remonta o site com o que já está salvo
-    python atualizar.py --minutos 60    # tempo máximo de coleta
+    python atualizar.py --minutos 60    # tempo máximo de coleta (somando os estados)
 
-Saídas (pastas configuráveis por variáveis de ambiente SAIDA e BRUTOS):
-    BRUTOS/cadastro.json            nome parlamentar, nome completo, partido, foto (site da Alece)
-    BRUTOS/meses/AAAA-MM.json       linhas da verba (VDP) e deputados da folha, por mês
-    SAIDA/meta.json                 data, anos, IPCA, situação de cada mês, totais da Assembleia
-    SAIDA/AAAA/resumo.json          um registro por deputado no ano
-    SAIDA/AAAA/notas/<id>.json      notas (empenhos) da verba de cada deputado
-    SAIDA/AAAA/fornecedores.json    quem recebeu da verba no ano
+Saídas (pastas configuráveis por variáveis de ambiente SAIDA e BRUTOS), <uf> = ce, ba...:
+    BRUTOS/ipca.json                     fatores do IPCA (comum a todos os estados)
+    BRUTOS/<uf>/cadastro.json            nome parlamentar, nome completo, partido, foto (site da Assembleia)
+    BRUTOS/ce/meses/AAAA-MM.json         Ceará: linhas da verba (VDP) e deputados da folha, por mês
+    BRUTOS/ba/listas/AAAA-MM.json        Bahia: notas da lista mensal da verba
+    BRUTOS/ba/detalhes/AAAA-MM.json      Bahia: detalhe de cada nota (CPF/CNPJ mascarado, fornecedor, glosa)
+    SAIDA/estados.json                   estados publicados (para o seletor do site)
+    SAIDA/<uf>/meta.json                 data, anos, IPCA, situação de cada mês, totais da Assembleia
+    SAIDA/<uf>/AAAA/resumo.json          um registro por deputado no ano
+    SAIDA/<uf>/AAAA/notas/<id>.json      notas da verba de cada deputado
+    SAIDA/<uf>/AAAA/fornecedores.json    quem recebeu da verba no ano
 """
 import argparse
 import difflib
@@ -27,12 +32,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from coletor import alece, http, ipca
+from coletor import alba, alece, http, ipca
 from coletor.privacidade import limpar_json
 
 RAIZ = Path(__file__).parent
-SAIDA = Path(os.environ.get("SAIDA") or RAIZ / "docs" / "dados")
-BRUTOS = Path(os.environ.get("BRUTOS") or RAIZ / "dados_brutos")
+SAIDA_RAIZ = Path(os.environ.get("SAIDA") or RAIZ / "docs" / "dados")
+BRUTOS_RAIZ = Path(os.environ.get("BRUTOS") or RAIZ / "dados_brutos")
+# pastas do Ceará (o coletor original); a Bahia usa BRUTOS_RAIZ / "ba" e SAIDA_RAIZ / "ba"
+SAIDA = SAIDA_RAIZ / "ce"
+BRUTOS = BRUTOS_RAIZ / "ce"
 VERSAO = 1
 log = logging.getLogger("qce")
 
@@ -68,12 +76,12 @@ def idade_meses(a: int, m: int, hoje: date) -> int:
 def atualizar_ipca():
     try:
         serie = ipca.baixar_ipca(config.ANO_INICIAL)
-        gravar(BRUTOS / "ipca.json", ipca.fatores_por_ano(serie))
+        gravar(BRUTOS_RAIZ / "ipca.json", ipca.fatores_por_ano(serie))
     except Exception as e:  # noqa: BLE001
         log.warning("IPCA indisponível (%s); mantém o anterior", e)
 
 
-def atualizar_cadastro():
+def atualizar_cadastro_ce():
     cad = ler(BRUTOS / "cadastro.json", {}) or {}
     try:
         lista = alece.ler_lista(alece.baixar_lista())
@@ -109,7 +117,7 @@ def atualizar_cadastro():
     return cad
 
 
-def coletar(hoje: date, limite_s: float, forcar: bool = False) -> int:
+def coletar_ce(hoje: date, limite_s: float, forcar: bool = False) -> int:
     t0, feitos = time.time(), 0
     for a, m in meses(config.ANO_INICIAL, hoje):
         if time.time() - t0 > limite_s:
@@ -275,14 +283,164 @@ def prever(folha_mes: dict, verba_mes: dict, decimo_pago: float, ult_folha: int,
     return {"ativo": True, "restante": round(folha_rest + verba_rest, 2), "folha": round(folha_rest, 2), "verba": round(verba_rest, 2)}
 
 
+def prever_so_verba(verba_mes: dict, ult_verba: int) -> dict:
+    """Estado sem folha nominal publicada (Bahia): só a verba, no ritmo médio dos meses fechados,
+    para quem usou a verba em algum dos 3 últimos meses com notas."""
+    if not ult_verba or not any(verba_mes.get(m) for m in range(max(1, ult_verba - 2), ult_verba + 1)):
+        return {"ativo": False, "restante": 0.0, "folha": 0.0, "verba": 0.0}
+    fechados = [v for m, v in verba_mes.items() if m < ult_verba]
+    ritmo = sum(fechados) / len(fechados) if fechados else 0.0
+    rest = ritmo * (12 - ult_verba) + max(0.0, ritmo - verba_mes.get(ult_verba, 0.0))
+    return {"ativo": True, "restante": round(rest, 2), "folha": 0.0, "verba": round(rest, 2)}
+
+
+# ------------------------------------------------------------------ Bahia (ALBA)
+B_BA = BRUTOS_RAIZ / "ba"
+
+
+def atualizar_cadastro_ba() -> dict:
+    """Deputados da legislatura (com suplentes) e quem está em exercício hoje. Chave: nome parlamentar (alece.chave)."""
+    cad = ler(B_BA / "cadastro.json", {}) or {}
+    try:
+        todos = alba.ler_deputados(alba.baixar_legislatura())
+        atuais = {d["codigo"] for d in alba.ler_deputados(alba.baixar_em_exercicio())}
+    except Exception as e:  # noqa: BLE001
+        log.warning("BA: lista de deputados indisponível (%s); mantém a anterior", e)
+        return cad
+    if not todos:
+        log.warning("BA: lista de deputados veio vazia; mantém a anterior")
+        return cad
+    for d in todos:
+        k = alece.chave(d["nome"])
+        x = cad.get(k, {})
+        x.update({k2: v for k2, v in d.items() if v})
+        x["slug"] = x.get("slug") or slug(d["nome"])
+        x["url"] = config.ALBA["perfil"].format(codigo=d["codigo"])
+        x["atual"] = d["codigo"] in atuais
+        x["visto_em"] = date.today().isoformat()
+        cad[k] = x
+    gravar(B_BA / "cadastro.json", cad)
+    try:
+        from coletor.fotos import baixar_fotos
+        baixar_fotos([(x["slug"], x.get("foto")) for x in cad.values() if x.get("slug")], SAIDA_RAIZ / "ba" / "fotos", B_BA / "fotos_sem.json")
+    except Exception as e:  # noqa: BLE001
+        log.warning("BA fotos: %s", e)
+    log.info("BA: %d deputados na legislatura, %d em exercício", len(todos), len(atuais))
+    return cad
+
+
+def coletar_ba(hoje: date, limite_s: float, forcar: bool = False) -> int:
+    """1) lista de cada mês (notas lançadas com atraso: refaz os últimos MESES_REBAIXAR_BA meses);
+    2) detalhe de cada nota ainda sem detalhe, do mês mais recente para o mais antigo (fica salvo para sempre)."""
+    t0, feitos = time.time(), 0
+    for a, m in meses(config.CASAS["ba"]["desde"], hoje):
+        if time.time() - t0 > limite_s * 0.4:
+            log.warning("BA: tempo das listas esgotado; o resto fica para a próxima execução")
+            break
+        arq = B_BA / "listas" / f"{a}-{m:02d}.json"
+        velho = ler(arq)
+        if velho and not forcar and idade_meses(a, m, hoje) > config.MESES_REBAIXAR_BA:
+            continue
+        try:
+            linhas = alba.lista_do_mes(a, m)
+        except http.SiteForaDoAr as e:
+            log.error("BA: %s", e)
+            return feitos
+        except Exception as e:  # noqa: BLE001
+            log.warning("BA %d-%02d: lista falhou (%s)", a, m, e)
+            continue
+        if not linhas and velho and velho.get("linhas"):
+            log.warning("BA %d-%02d: lista veio vazia agora, mas já tinha notas; mantém a antiga", a, m)
+            continue
+        gravar(arq, {"ano": a, "mes": m, "baixado_em": hoje.isoformat(), "linhas": linhas})
+        feitos += 1
+        log.info("BA %d-%02d: %d notas na lista (R$ %.2f)", a, m, len(linhas), sum(x["valor"] for x in linhas))
+    # detalhes
+    novos = 0
+    for arq in sorted((B_BA / "listas").glob("*.json"), reverse=True):
+        lista = ler(arq) or {}
+        arq_d = B_BA / "detalhes" / arq.name
+        det = ler(arq_d, {}) or {}
+        falta = [x["id"] for x in lista.get("linhas", []) if x["id"] not in det
+                 or (det[x["id"]].get("falhou") and hoje.toordinal() - date.fromisoformat(det[x["id"]]["falhou"]).toordinal() > 30)]
+        mudou = 0
+        for i in falta:
+            if time.time() - t0 > limite_s:
+                break
+            try:
+                det[i] = alba.ler_detalhe(alba.baixar_detalhe(i))
+            except http.SiteForaDoAr as e:
+                log.error("BA: %s", e)
+                gravar(arq_d, det)
+                return feitos
+            except Exception as e:  # noqa: BLE001
+                det[i] = {"itens": [], "falhou": hoje.isoformat()}
+                log.warning("BA detalhe %s: %s", i, e)
+            mudou += 1
+            novos += 1
+            if mudou % 100 == 0:
+                gravar(arq_d, det)
+        if mudou:
+            gravar(arq_d, det)
+            log.info("BA %s: %d detalhes novos (%d de %d)", arq.stem, mudou, len(det), len(lista.get("linhas", [])))
+        if time.time() - t0 > limite_s:
+            log.warning("BA: tempo esgotado nos detalhes; o resto fica para a próxima execução")
+            break
+    log.info("BA: %d listas, %d detalhes novos", feitos, novos)
+    return feitos + novos
+
+
+def _item_da_nota(nota: dict, det: dict | None) -> dict | None:
+    itens = (det or {}).get("itens") or []
+    if len(itens) == 1:
+        return itens[0]
+    for it in itens:
+        if it["nota"] == nota["nota"]:
+            return it
+    for it in itens:
+        if abs(it["valor"] - nota["valor"]) < 0.01:
+            return it
+    return itens[0] if itens else None
+
+
+def meses_ba() -> list[dict]:
+    """Notas da Bahia no mesmo formato dos meses do Ceará (sem folha: a ALBA não publica a folha nominal).
+    Valor = valor da nota menos a glosa (parte que a Assembleia recusou)."""
+    out = []
+    for arq in sorted((B_BA / "listas").glob("*.json")):
+        lista = ler(arq) or {}
+        det = ler(B_BA / "detalhes" / arq.name, {}) or {}
+        vdp = []
+        for n in lista.get("linhas", []):
+            it = _item_da_nota(n, det.get(n["id"]))
+            glosa = (it or {}).get("glosa") or 0.0
+            desc = f"Nota {n['nota']}" if n["nota"] else "Nota sem número"
+            if glosa:
+                desc += f" · glosa de R$ {glosa:,.2f} (valor recusado pela Assembleia, já descontado)".replace(",", "X").replace(".", ",").replace("X", ".")
+            if not it:
+                desc += " · fornecedor ainda não coletado"
+            vdp.append({"deputado": n["deputado"], "periodo": n["competencia"], "empenho": n["processo"],
+                        "descricao": desc, "doc": (it or {}).get("doc", ""), "tipo": (it or {}).get("tipo", "?"),
+                        "credor": (it or {}).get("fornecedor", ""), "valor": round(n["valor"] - glosa, 2),
+                        "categoria": alba.categoria(n["categoria_oficial"])})
+        out.append({"ano": lista["ano"], "mes": lista["mes"], "vdp": vdp, "recusadas": [],
+                    "folha": {"deputados": [], "categorias": {}}})
+    return out
+
+
 # ------------------------------------------------------------------ montagem
-def montar(hoje: date):
-    cad = ler(BRUTOS / "cadastro.json", {}) or {}
-    ip = ler(BRUTOS / "ipca.json", {"fatores": {}, "referencia": None})
+def meses_ce() -> list[dict]:
+    return [d for p in sorted((BRUTOS / "meses").glob("*.json")) if (d := ler(p))]
+
+
+def montar(hoje: date, uf: str = "ce", meses_brutos: list[dict] | None = None):
+    casa = config.CASAS[uf]
+    saida, brutos = SAIDA_RAIZ / uf, BRUTOS_RAIZ / uf
+    cad = ler(brutos / "cadastro.json", {}) or {}
+    ip = ler(BRUTOS_RAIZ / "ipca.json", {"fatores": {}, "referencia": None})
     por_ano: dict[int, list[dict]] = defaultdict(list)
-    for p in sorted((BRUTOS / "meses").glob("*.json")):
-        d = ler(p)
-        if d:
+    for d in (meses_ce() if meses_brutos is None else meses_brutos):
+        if d["ano"] >= casa["desde"]:
             por_ano[d["ano"]].append(d)
 
     # nome completo (folha) -> id; nome parlamentar (verba) -> id
@@ -307,7 +465,7 @@ def montar(hoje: date):
                 rot = "Nome não identificado na planilha" if i == NAO_IDENTIFICADO else nome.title()
                 x = deps[i] = {"id": i, "nome": inf.get("nome") or rot, "nome_completo": inf.get("nome_completo") or completo,
                                "partido": inf.get("partido", ""), "foto": inf.get("foto", ""), "atual": bool(inf.get("atual")),
-                               "url": config.ALECE["perfil"].format(slug=i) if i in info_por_id else "",
+                               "url": inf.get("url") or (casa["perfil"].format(slug=i) if i in info_por_id and "{slug}" in casa["perfil"] else ""),
                                "folha": 0.0, "meses_folha": 0, "verba": 0.0, "meses_verba": 0, "notas": 0,
                                "categorias": defaultdict(float), "situacao": "",
                                "_verba_mes": defaultdict(float), "_folha_mes": {}, "_decimo": 0.0}
@@ -367,13 +525,20 @@ def montar(hoje: date):
         # previsão até dezembro (estimativa), só no ano em andamento
         ult_folha = max((m for x in deps.values() for m in x["_folha_mes"]), default=0)
         ult_verba = max((m for x in deps.values() for m in x["_verba_mes"]), default=0)
-        em_andamento = ano == hoje.year and ult_folha < 12
+        if not casa["salario"]:
+            ult_folha = ult_verba          # sem folha publicada: a previsão é só da verba, a partir do último mês com notas
+        em_andamento = ano == hoje.year and 0 < ult_folha < 12
         lista = []
         for x in deps.values():
             vm, fm, dec = x.pop("_verba_mes"), x.pop("_folha_mes"), x.pop("_decimo")
             x["mensal_verba"] = [round(vm.get(m, 0.0), 2) for m in range(1, 13)]
             x["mensal_folha"] = [round(fm.get(m, 0.0), 2) for m in range(1, 13)]
-            x["previsao"] = prever(fm, vm, dec, ult_folha, ult_verba) if em_andamento else None
+            if not em_andamento:
+                x["previsao"] = None
+            elif casa["salario"]:
+                x["previsao"] = prever(fm, vm, dec, ult_folha, ult_verba)
+            else:
+                x["previsao"] = prever_so_verba(vm, ult_verba)
             x.pop("_nome_da_folha", None)
             x["folha"], x["verba"] = round(x["folha"], 2), round(x["verba"], 2)
             x["total"] = round(x["folha"] + x["verba"], 2)
@@ -395,14 +560,15 @@ def montar(hoje: date):
             "categorias": {k: round(v, 2) for k, v in sorted(cats.items(), key=lambda kv: -kv[1])},
             "por_mes": por_mes,
             "fechado": not em_andamento,
+            "sem_fornecedor": sum(1 for ns in notas.values() for n in ns if not n[3]),
             "previsao": {"ult_folha": ult_folha, "ult_verba": ult_verba,
                          "restante": round(sum((x["previsao"] or {}).get("restante", 0) for x in lista), 2),
                          "folha": round(sum((x["previsao"] or {}).get("folha", 0) for x in lista), 2),
                          "verba": round(sum((x["previsao"] or {}).get("verba", 0) for x in lista), 2)} if em_andamento else None,
             "deputados": lista,
         }
-        gravar(SAIDA / str(ano) / "resumo.json", resumo)
-        pasta_notas = SAIDA / str(ano) / "notas"
+        gravar(saida / str(ano) / "resumo.json", resumo)
+        pasta_notas = saida / str(ano) / "notas"
         for velho in pasta_notas.glob("*.json"):
             if velho.stem not in notas:
                 velho.unlink()
@@ -417,7 +583,7 @@ def montar(hoje: date):
                 g = grupo_forn(doc)
                 f = grupos[g].setdefault(doc, {"nome": credor, "tipo": forn.get(doc, {}).get("tipo", ""), "notas": []})
                 f["notas"].append([mes_n, i, emp, cat, valor, desc])
-        pasta_f = SAIDA / str(ano) / "forn"
+        pasta_f = saida / str(ano) / "forn"
         for velho in pasta_f.glob("*.json"):
             if velho.stem not in grupos:
                 velho.unlink()
@@ -425,19 +591,35 @@ def montar(hoje: date):
             for f in conteudo.values():
                 f["notas"].sort(key=lambda n: (n[0], n[2]), reverse=True)
             gravar(pasta_f / f"{g}.json", conteudo)
-        gravar(SAIDA / str(ano) / "fornecedores.json", {"campos": ["doc", "nome", "tipo", "total", "notas", "deputados"], "linhas": fornecedores})
+        gravar(saida / str(ano) / "fornecedores.json", {"campos": ["doc", "nome", "tipo", "total", "notas", "deputados"], "linhas": fornecedores})
         assembleia[str(ano)] = {cat: {"bruta": round(p["bruta"], 2), "media_pessoas": round(p["n_soma"] / p["n_meses"]) if p["n_meses"] else 0,
                                       "meses": p["n_meses"]} for cat, p in sorted(pessoal.items(), key=lambda kv: -kv[1]["bruta"])}
         log.info("%d: %d deputados, folha R$ %.2f, verba R$ %.2f", ano, len(lista), resumo["totais"]["folha"], resumo["totais"]["verba"])
 
-    gravar(SAIDA / "meta.json", {
-        "gerado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-        "versao": VERSAO, "uf": config.ALECE["uf"], "casa": config.ALECE["nome"], "sigla": config.ALECE["sigla"],
+    gerado = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    gravar(saida / "meta.json", {
+        "gerado_em": gerado,
+        "versao": VERSAO, "uf": casa["uf"], "casa": casa["nome"], "sigla": casa["sigla"],
+        "estado": casa["estado"], "do_estado": casa["do_estado"], "salario": casa["salario"],
+        "subsidio": casa.get("subsidio"), "subsidio_lei": casa.get("subsidio_lei"),
+        "verba": casa["verba"], "verba_curta": casa["verba_curta"], "limite": casa["limite"], "desde": casa["desde"],
         "anos": anos, "ipca": ip, "meses": situacao_meses,
         "pessoal_assembleia": assembleia,
         "sem_casar": {str(a): sorted(v) for a, v in sem_casar.items()},
-        "fontes": {"verba": config.ALECE["vdp_pagina"], "folha": config.ALECE["folha_pagina"], "deputados": config.ALECE["lista_deputados"]},
+        "fontes": casa["fontes"],
     })
+    gravar_estados(uf, gerado, anos)
+
+
+def gravar_estados(uf: str, gerado: str, anos: list[int]):
+    """Lista dos estados publicados, para o seletor do site (só entra quem já tem dados montados)."""
+    atual = {e["id"]: e for e in (ler(SAIDA_RAIZ / "estados.json", {}) or {}).get("estados", [])}
+    c = config.CASAS[uf]
+    atual[uf] = {"id": uf, "uf": c["uf"], "estado": c["estado"], "do_estado": c["do_estado"], "casa": c["nome"],
+                 "sigla": c["sigla"], "vagas": c["vagas"], "desde": c["desde"], "salario": c["salario"],
+                 "anos": anos, "gerado_em": gerado}
+    ordem = list(config.CASAS)
+    gravar(SAIDA_RAIZ / "estados.json", {"estados": sorted(atual.values(), key=lambda e: ordem.index(e["id"]) if e["id"] in ordem else 99)})
 
 
 def main(argv=None):
@@ -445,14 +627,30 @@ def main(argv=None):
     ap.add_argument("--so-montar", action="store_true")
     ap.add_argument("--forcar", action="store_true", help="baixa de novo todos os meses")
     ap.add_argument("--minutos", type=float, default=90)
+    ap.add_argument("--uf", default="todas", help="ce, ba ou todas")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     hoje = date.today()
+    ufs = list(config.CASAS) if args.uf == "todas" else [args.uf]
+    t0, limite = time.time(), args.minutos * 60
     if not args.so_montar:
         atualizar_ipca()
-        atualizar_cadastro()
-        coletar(hoje, args.minutos * 60, args.forcar)
-    montar(hoje)
+    for uf in ufs:
+        resta = limite - (time.time() - t0)
+        try:
+            if uf == "ce":
+                if not args.so_montar:
+                    atualizar_cadastro_ce()
+                    coletar_ce(hoje, resta, args.forcar)
+                montar(hoje, "ce")
+            elif uf == "ba":
+                if not args.so_montar:
+                    atualizar_cadastro_ba()
+                    coletar_ba(hoje, resta, args.forcar)
+                montar(hoje, "ba", meses_ba())
+        except Exception:  # noqa: BLE001
+            log.error("%s: falhou; os outros estados seguem", uf.upper())
+            traceback.print_exc()
     return 0
 
 
