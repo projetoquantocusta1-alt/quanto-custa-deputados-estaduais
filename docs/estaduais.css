@@ -51,3 +51,7 @@ details.equipe summary { cursor: pointer; font-weight: 700; color: #2463A6; }
 .coleta-aviso .vis-ponto { background: #D69A32; box-shadow: none; }
 .aviso-div { background: #FDF0EF; border: 1px solid #E3A6A0; border-left: 5px solid #C84C4C; border-radius: 10px; padding: 10px 14px; color: #4a1f1b; font-size: 14px; margin: 0 0 12px; }
 #m-recusadas ul { margin: 6px 0; padding-left: 18px; } #m-recusadas li { margin: 4px 0; }
+
+/* limite de anos por estado */
+.limite-anos { max-width: 640px; margin: 0 auto 16px; font-size: 13.5px; line-height: 1.5; color: var(--muted); text-align: center; }
+.limite-anos b { color: var(--ink); }

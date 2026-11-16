@@ -278,7 +278,7 @@ async function iniciar() {
   const anos = E.meta.anos.slice().reverse();
   const pedido = new URL(location).searchParams.get("ano");
   E.ano = pedido && (pedido === "total" || anos.includes(+pedido)) ? (pedido === "total" ? "total" : +pedido) : anos[0];
-  $("#f-ano").innerHTML = `<option value="total">Todos os anos</option>` + anos.map((a) => `<option value="${a}">${a}</option>`).join("");
+  $("#f-ano").innerHTML = `<option value="total">Todos os anos (desde 2023)</option>` + anos.map((a) => `<option value="${a}">${a}</option>`).join("");
   $("#f-ano").value = E.ano;
   if (E.meta.ipca?.referencia) $("#ipca-ref").textContent = `IPCA até ${E.meta.ipca.referencia}`;
   $("#atualizado").textContent = `Atualizado em ${new Date(E.meta.gerado_em).toLocaleString("pt-BR")}`;
