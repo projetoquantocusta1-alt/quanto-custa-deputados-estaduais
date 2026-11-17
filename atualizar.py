@@ -174,7 +174,7 @@ def _palavras_contidas(pals: list[str], nome_folha: str) -> bool:
     return bool(pals) and all(any(bate(p, q) for q in alvo) for p in pals)
 
 
-def resolver_nomes(meses_brutos: list[dict], cad: dict) -> tuple[dict, dict]:
+def resolver_nomes(meses_brutos: list[dict], cad: dict, aceitar_curtos: bool = False) -> tuple[dict, dict]:
     """Liga, de uma vez para todos os meses, os nomes da verba (nome parlamentar, às vezes digitado com erro)
     e os nomes da folha (nome completo) a um mesmo identificador.
     Ordem: cadastro do site da Alece (exato ou quase igual) -> tabela de apelidos conferidos -> palavras do
@@ -249,6 +249,10 @@ def resolver_nomes(meses_brutos: list[dict], cad: dict) -> tuple[dict, dict]:
         elif len(k.split()) >= 2:
             id_vdp[v] = slug(k)                                  # pessoa sem salário ligado: aparece só com a verba
             chaves_ok[k] = id_vdp[v]
+        elif aceitar_curtos and v.strip():
+            # Bahia: a coluna "deputado" já é o nome parlamentar oficial; "Capitão Alden" fica "ALDEN" sem o título,
+            # mas é um deputado, não um nome estranho
+            id_vdp[v] = slug(v)
     # deputados do cadastro sem nome completo casado: palavras do nome parlamentar na folha
     usados = set(id_folha.values())
     for k, i in por_parl.items():
@@ -449,7 +453,7 @@ def montar(hoje: date, uf: str = "ce", meses_brutos: list[dict] | None = None):
     info_por_id = {x["slug"]: x for x in cad.values() if x.get("slug")}
     situacao_meses, sem_casar, assembleia = {}, defaultdict(set), {}
     todos = [m for ms in por_ano.values() for m in ms]
-    id_vdp, id_folha = resolver_nomes(todos, cad)
+    id_vdp, id_folha = resolver_nomes(todos, cad, aceitar_curtos=not casa["salario"])
     anos = sorted(por_ano)
     for ano in anos:
         deps: dict[str, dict] = {}
