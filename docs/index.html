@@ -129,6 +129,19 @@
         <p><b>Mês da nota</b>: usamos a competência (o mês a que a despesa se refere). A Assembleia continua lançando notas de um mês por muito tempo depois; por isso o robô refaz a lista dos últimos 12 meses todos os dias, e os meses recentes ainda podem crescer.</p>
         <p><b>Previsão até dezembro</b> (estimativa): só a verba, no ritmo médio mensal do ano, para quem usou a verba nos últimos meses.</p>
         </div>
+        <div data-uf-texto="rn" hidden>
+        <h2>De onde vêm os dados</h2>
+        <ul>
+          <li><b>Cota parlamentar (verba de gabinete)</b>: a <a href="https://transparencia.al.rn.leg.br/verbas" target="_blank" rel="noopener">página de Cotas Parlamentares do Portal da Transparência da ALRN</a>, nota a nota, com fornecedor, CNPJ/CPF, categoria e valor. O portal é um aplicativo que lê uma API de dados abertos; essa API exige uma <b>chave de acesso que o próprio portal embute no código entregue a qualquer visitante</b> (não é segredo: todo navegador que abre a página a usa). O robô usa essa mesma chave pública para ler os dados.</li>
+          <li><b>Salário</b>: a ALRN <b>não publica a folha de pagamento com o nome de cada deputado</b>. Por isso o salário não entra no custo dos deputados do Rio Grande do Norte.</li>
+          <li><b>Deputados</b>: nome e a página de cada um vêm do próprio registro das despesas (o mesmo código usado no <a href="https://www.al.rn.leg.br/deputados" target="_blank" rel="noopener">site da ALRN</a>).</li>
+          <li><b>IPCA</b>: Banco Central, para trazer valores antigos para preços de hoje.</li>
+        </ul>
+        <h2>O que entra no custo</h2>
+        <p><b>Só a cota parlamentar</b>. Sem o salário (não publicado) e sem a equipe do gabinete. Por isso o custo de cada deputado do Rio Grande do Norte é um <b>piso</b> e <b>não deve ser comparado diretamente</b> com o do Ceará, que soma o salário.</p>
+        <p><b>Desde 2023</b>: início da legislatura atual, o mesmo período dos outros estados. O portal da ALRN publica a cota desde 2009, mas usamos de 2023 em diante para comparar no mesmo período.</p>
+        <p><b>Previsão até dezembro</b> (estimativa): só a cota, no ritmo médio mensal do ano, para quem usou a cota nos últimos meses.</p>
+        </div>
         <p>CPF de pessoas físicas aparece mascarado (***.456.789-**).</p>
         <div id="m-recusadas"></div>
       </article>
@@ -144,7 +157,7 @@
 <script src="vendor/chart.umd.js"></script>
 <script src="boasvindas.js?v=1" data-site="e"></script>
 <script src="cartao.js?v=5"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 <!-- contador de visitas sem cookies e sem dados pessoais (GoatCounter) -->
 <script data-goatcounter="https://quantocustaum.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 <script>/* número de visitas: selo no topo (ou no rodapé, se a página não tiver selo); some se o GoatCounter não responder */

@@ -29,7 +29,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Testes
         run: python -m pytest -q tests
-      - name: Coletar nas Assembleias (Ceará e Bahia) e montar o site
+      - name: Coletar nas Assembleias (Ceará, Bahia e Rio Grande do Norte) e montar o site
         run: |
           if [ "${{ github.event.inputs.forcar }}" = "sim" ]; then python atualizar.py --minutos 170 --forcar; else python atualizar.py --minutos 170; fi
       - name: Publicar

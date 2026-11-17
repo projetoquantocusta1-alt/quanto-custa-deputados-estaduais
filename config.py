@@ -96,6 +96,23 @@ CATEGORIAS_ALBA = [
     ("Trabalhos técnicos", r"TRABALHOS TECNICOS"),
 ]
 
+
+# --- Rio Grande do Norte (ALRN) ---
+# O portal de transparência (um aplicativo que lê a API api-transparencia.al.rn.leg.br) exige um token de
+# acesso embutido no próprio código entregue ao navegador. O robô lê esse token público do portal a cada
+# execução (coletor/alrn.py), em vez de guardá-lo aqui. A ALRN publica a cota parlamentar nota a nota, mas
+# não a folha de pagamento nominal dos deputados.
+ALRN = {
+    "uf": "RN",
+    "nome": "Assembleia Legislativa do Rio Grande do Norte",
+    "sigla": "ALRN",
+    "portal": "https://transparencia.al.rn.leg.br/",
+    "api": "https://api-transparencia.al.rn.leg.br",
+    "verba_pagina": "https://transparencia.al.rn.leg.br/verbas",
+    "deputados": "https://www.al.rn.leg.br/deputados",
+    "perfil": "https://www.al.rn.leg.br/deputado/{codigo}/{slug}",
+}
+
 # Estados publicados no site (ordem do seletor). "limite" explica por que os dados começam no ano "desde".
 CASAS = {
     "ce": {
@@ -119,5 +136,18 @@ CASAS = {
                    "período. A Assembleia da Bahia não publica a folha de pagamento com o nome de cada deputado, só o "
                    "subsídio fixado em lei (hoje, R$ 34.774,64 por mês). Por isso, na Bahia, o custo mostrado é só o da verba "
                    "indenizatória, sem o salário."),
+    },
+    "rn": {
+        "uf": "RN", "estado": "Rio Grande do Norte", "do_estado": "do Rio Grande do Norte", "nome": ALRN["nome"],
+        "sigla": "ALRN", "vagas": 24, "desde": 2023, "salario": False,
+        "verba": "Cota parlamentar (verba de gabinete)", "verba_curta": "Cota parlamentar",
+        "perfil": ALRN["perfil"],
+        "fontes": {"verba": ALRN["verba_pagina"], "deputados": ALRN["deputados"]},
+        "limite": ("Dados desde janeiro de 2023, início da legislatura atual, para comparar com os outros estados no "
+                   "mesmo período (o portal da ALRN tem a cota desde 2009). A Assembleia do Rio Grande do Norte publica "
+                   "a cota parlamentar nota a nota, com fornecedor e valor, mas não a folha de pagamento com o salário de "
+                   "cada deputado; por isso mostramos só a cota. Os números vêm do portal de transparência da ALRN, que "
+                   "exige uma chave de acesso embutida no próprio código do site; o robô usa essa mesma chave pública "
+                   "para ler os dados abertos."),
     },
 }

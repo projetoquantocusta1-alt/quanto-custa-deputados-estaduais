@@ -190,7 +190,7 @@ async function rAssembleia() {
   $("#a-dica").textContent = temSalario() ? `A folha da ${sigla()} é nominal, mas não diz em qual gabinete trabalha cada assessor parlamentar. Por isso os assessores aparecem aqui, no total da Assembleia, e não no custo de cada deputado.` : "";
   if (!temSalario()) {
     kpis("#a-kpis", [["Folha da Assembleia", "não publicada", "sem nomes nem totais por categoria"], ...(M().subsidio ? [["Subsídio de cada deputado", brl(M().subsidio, 2), `por mês · ${M().subsidio_lei || "fixado em lei"}`]] : [])]);
-    $("#a-tab").innerHTML = `<tbody><tr><td class="quebra">A ${esc(casa())} não publica a folha de pagamento com o nome de cada pessoa, como faz o Ceará. Publica só a tabela de salários por cargo${M().fontes?.subsidio ? ` (<a href="${esc(M().fontes.subsidio)}" target="_blank" rel="noopener">tabela dos deputados</a>)` : ""}. Por isso esta página fica sem os totais da folha neste estado.</td></tr></tbody>`;
+    $("#a-tab").innerHTML = `<tbody><tr><td class="quebra">A ${esc(casa())} não publica a folha de pagamento com o nome de cada pessoa, como faz o Ceará.${M().fontes?.subsidio || M().subsidio ? ` Publica só a tabela de salários por cargo${M().fontes?.subsidio ? ` (<a href="${esc(M().fontes.subsidio)}" target="_blank" rel="noopener">tabela dos deputados</a>)` : ""}.` : ""} Por isso esta página fica sem os totais da folha neste estado.</td></tr></tbody>`;
     return;
   }
   const anos = tot() ? E.meta.anos : [E.ano], cats = {};

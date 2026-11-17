@@ -1,4 +1,4 @@
-"""Robô dos deputados estaduais (um estado por vez: Ceará / Alece, Bahia / ALBA).
+"""Robô dos deputados estaduais (um estado por vez: Ceará / Alece, Bahia / ALBA, Rio Grande do Norte / ALRN).
 
 Uso:
     python atualizar.py                 # baixa o que falta e monta o site, todos os estados
@@ -32,7 +32,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from coletor import alba, alece, http, ipca
+from coletor import alba, alece, alrn, http, ipca
 from coletor.privacidade import limpar_json
 
 RAIZ = Path(__file__).parent
@@ -432,6 +432,80 @@ def meses_ba() -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------ Rio Grande do Norte (ALRN)
+B_RN = BRUTOS_RAIZ / "rn"
+
+
+def coletar_rn(hoje: date, limite_s: float, forcar: bool = False) -> int:
+    """Cota parlamentar de cada mês pela API pública do portal. Monta o cadastro a partir dos próprios dados
+    (cada despesa traz o deputado, com o mesmo código da página dele no site da Assembleia)."""
+    t0, feitos = time.time(), 0
+    cad = ler(B_RN / "cadastro.json", {}) or {}
+    for ano in range(config.CASAS["rn"]["desde"], hoje.year + 1):
+        if time.time() - t0 > limite_s:
+            log.warning("RN: tempo esgotado; o resto fica para a próxima execução")
+            break
+        try:
+            meses = alrn.meses_do_ano(ano)
+        except http.SiteForaDoAr as e:
+            log.error("RN: %s", e)
+            break
+        except Exception as e:  # noqa: BLE001
+            log.warning("RN %d: meses indisponíveis (%s)", ano, e)
+            continue
+        for mes_num, mes_id in meses:
+            if (ano, mes_num) > (hoje.year, hoje.month):
+                continue
+            arq = B_RN / "meses" / f"{ano}-{mes_num:02d}.json"
+            velho = ler(arq)
+            if velho and not forcar and idade_meses(ano, mes_num, hoje) > config.MESES_REBAIXAR:
+                continue
+            if time.time() - t0 > limite_s:
+                break
+            try:
+                desp = alrn.despesas_do_mes(mes_id)
+            except http.SiteForaDoAr as e:
+                log.error("RN: %s", e)
+                gravar(B_RN / "cadastro.json", cad)
+                return feitos
+            except Exception as e:  # noqa: BLE001
+                log.warning("RN %d-%02d: despesas falharam (%s)", ano, mes_num, e)
+                continue
+            if not desp and velho and velho.get("vdp"):
+                log.warning("RN %d-%02d: veio vazio agora, mas já tinha notas; mantém o antigo", ano, mes_num)
+                continue
+            periodo = f"{ano}-{mes_num:02d}"
+            vdp = [alrn.nota_despesa(d, periodo) for d in desp]
+            for d in desp:                                  # cadastro a partir das próprias despesas
+                dd = d.get("deputado") or {}
+                nome = re.sub(r"\s+", " ", dd.get("nome") or "").strip()
+                if not nome:
+                    continue
+                k = alece.chave(nome)
+                x = cad.get(k, {})
+                x["nome"] = nome.title()
+                x["codigo"] = str(dd.get("id") or d.get("deputado_id") or "")
+                x["slug"] = x.get("slug") or slug(nome)
+                x["url"] = (config.ALRN["perfil"].format(codigo=x["codigo"], slug=x["slug"])
+                            if x["codigo"] else config.ALRN["deputados"])
+                if ano == hoje.year:
+                    x["atual"] = True
+                x.setdefault("atual", False)
+                x["visto_em"] = hoje.isoformat()
+                cad[k] = x
+            gravar(arq, {"ano": ano, "mes": mes_num, "vdp": vdp, "recusadas": [],
+                         "folha": {"deputados": [], "categorias": {}}})
+            feitos += 1
+            log.info("RN %d-%02d: %d notas (R$ %.2f)", ano, mes_num, len(vdp), sum(n["valor"] for n in vdp))
+    gravar(B_RN / "cadastro.json", cad)
+    log.info("RN: %d meses coletados, %d deputados no cadastro", feitos, len(cad))
+    return feitos
+
+
+def meses_rn() -> list[dict]:
+    return [d for p in sorted((B_RN / "meses").glob("*.json")) if (d := ler(p))]
+
+
 # ------------------------------------------------------------------ montagem
 def meses_ce() -> list[dict]:
     return [d for p in sorted((BRUTOS / "meses").glob("*.json")) if (d := ler(p))]
@@ -631,7 +705,7 @@ def main(argv=None):
     ap.add_argument("--so-montar", action="store_true")
     ap.add_argument("--forcar", action="store_true", help="baixa de novo todos os meses")
     ap.add_argument("--minutos", type=float, default=90)
-    ap.add_argument("--uf", default="todas", help="ce, ba ou todas")
+    ap.add_argument("--uf", default="todas", help="ce, ba, rn ou todas")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     hoje = date.today()
@@ -652,6 +726,10 @@ def main(argv=None):
                     atualizar_cadastro_ba()
                     coletar_ba(hoje, resta, args.forcar)
                 montar(hoje, "ba", meses_ba())
+            elif uf == "rn":
+                if not args.so_montar:
+                    coletar_rn(hoje, resta, args.forcar)
+                montar(hoje, "rn", meses_rn())
         except Exception:  # noqa: BLE001
             log.error("%s: falhou; os outros estados seguem", uf.upper())
             traceback.print_exc()
