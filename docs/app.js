@@ -25,7 +25,14 @@ const porExtenso = (v) => { const a = Math.abs(v || 0);
 const mesBR = (k) => { const [a, m] = String(k).split("-"); return `${MESES[+m - 1]}/${a}`; };
 const tot = () => E.ano === "total";
 const base = () => `dados/${E.uf}/`;
-const M = () => E.meta || {};
+// "todos": visão de todos os estados juntos (como a dos deputados federais). Ids viram "uf~id".
+const todosUF = () => E.uf === "todos";
+const SEP = "~";
+const parteId = (id) => { const s = String(id); const i = s.indexOf(SEP); return i > 0 ? [s.slice(0, i), s.slice(i + 1)] : [E.uf, s]; };
+const caminhoUF = (id) => `dados/${parteId(id)[0]}/`;
+const naoId = (id) => parteId(id)[1] === "nao-identificado";
+// na ficha de um deputado (visão de todos), os textos seguem o estado dele
+const M = () => E.metaFicha || E.meta || {};
 const doEstado = () => M().do_estado || "do Ceará";
 const casa = () => M().casa || "Assembleia Legislativa";
 const sigla = () => M().sigla || "Assembleia";
@@ -43,7 +50,26 @@ const foto = (d, cls = "") => d.foto ? `<img class="${cls}" src="${esc(d.foto)}"
 
 async function resumo(a) {
   if (E.res[a]) return E.res[a];
-  return (E.res[a] = await getJSON(`${base()}${a}/resumo.json`).catch(() => null));
+  if (!todosUF()) return (E.res[a] = await getJSON(`${base()}${a}/resumo.json`).catch(() => null));
+  // todos os estados: junta os resumos do ano; cada deputado ganha a UF e um id único "uf~id"
+  const rs = (await Promise.all(E.estados.map(async (e) => [e, await getJSON(`dados/${e.id}/${a}/resumo.json`).catch(() => null)]))).filter(([, r]) => r);
+  if (!rs.length) return (E.res[a] = null);
+  const out = { ano: a, fator_ipca: rs[0][1].fator_ipca, deputados: [], por_mes: {}, categorias: {}, sem_fornecedor: 0,
+    totais: { folha: 0, verba: 0, total: 0, deputados: 0 }, ultimo_mes: null, previsao: null, fechado: rs.every(([, r]) => r.fechado) };
+  let prev = null;
+  rs.forEach(([e, r]) => {
+    r.deputados.forEach((d) => out.deputados.push({ ...d, id: e.id + SEP + d.id, uf: e.uf || e.id.toUpperCase(), sem_salario: e.salario === false }));
+    Object.entries(r.por_mes || {}).forEach(([k, x]) => { const o = (out.por_mes[k] = out.por_mes[k] || { folha: 0, verba: 0 }); o.folha += x.folha; o.verba += x.verba; });
+    Object.entries(r.categorias || {}).forEach(([k, v]) => (out.categorias[k] = (out.categorias[k] || 0) + v));
+    ["folha", "verba", "total", "deputados"].forEach((k) => (out.totais[k] += r.totais?.[k] || 0));
+    out.sem_fornecedor += r.sem_fornecedor || 0;
+    if (!out.ultimo_mes || (r.ultimo_mes || "") > out.ultimo_mes) out.ultimo_mes = r.ultimo_mes;
+    if (r.previsao) prev = prev ? { ult_folha: Math.min(prev.ult_folha, r.previsao.ult_folha), ult_verba: Math.max(prev.ult_verba, r.previsao.ult_verba),
+      restante: prev.restante + r.previsao.restante, folha: prev.folha + r.previsao.folha, verba: prev.verba + r.previsao.verba } : { ...r.previsao };
+  });
+  out.previsao = prev;
+  out.deputados.sort((x, y) => y.total - x.total);
+  return (E.res[a] = out);
 }
 // ano escolhido ou soma de todos os anos (cada ano corrigido pelo próprio IPCA)
 async function dados() {
@@ -75,7 +101,7 @@ async function rInicio() {
     : temSalario() ? `Os deputados estaduais ${doEstado()} custaram em ${E.ano}` : `Os deputados estaduais ${doEstado()} gastaram da ${verbaNome().toLowerCase()} em ${E.ano}`;
   const r = tot() ? null : E.res[E.ano], prev = r?.previsao, rest = prev ? soma(D.map((d) => d.prev || 0)) : 0;
   cancelAnimationFrame(E.tick);
-  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}${temSalario() ? "Salário bruto (folha) + verba de desempenho parlamentar" : `Só a ${verbaNome().toLowerCase()}: a ${sigla()} não publica a folha de pagamento com o nome de cada deputado, por isso o salário não está somado`}. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}` : ""}.`;
+  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}${M().todos ? `Salário bruto (folha) + verba de gabinete. ${M().sem_folha?.length ? `Sem o salário dos deputados ${M().sem_folha_de}: a Assembleia não publica a folha com o nome de cada deputado; por isso a soma é um piso` : ""}` : temSalario() ? "Salário bruto (folha) + verba de desempenho parlamentar" : `Só a ${verbaNome().toLowerCase()}: a ${sigla()} não publica a folha de pagamento com o nome de cada deputado, por isso o salário não está somado`}. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}` : ""}.`;
   if (prev && rest > 0) {
     // corre em tempo real: do 1º dia depois da última folha publicada até 31/12, no ritmo da previsão
     const ini = new Date(r.ano, prev.ult_folha, 1).getTime(), fim = new Date(r.ano + 1, 0, 1).getTime();
@@ -91,7 +117,7 @@ async function rInicio() {
   const folha = soma(D.map((d) => d.folha)), verba = soma(D.map((d) => d.verba));
   const comVerba = D.filter((d) => d.meses_verba), mesesV = soma(comVerba.map((d) => d.meses_verba));
   kpis("#i-kpis", [...(prev && rest > 0 ? [["Previsão até dezembro", "+" + curto(rest), `${E.ano} deve fechar em ${curto(T + rest)} (estimativa)`]] : []),
-    temSalario() ? ["Salários (folha bruta)", curto(folha), porExtenso(folha)]
+    temSalario() ? [M().sem_folha?.length ? `Salários (folha bruta) · sem os deputados ${M().sem_folha_de}` : "Salários (folha bruta)", curto(folha), porExtenso(folha)]
       : ["Salário (subsídio)", "não publicado", M().subsidio ? `por deputado; o subsídio fixado em lei é de ${brl(M().subsidio, 2)} por mês` : "a Assembleia não publica a folha nominal"],
     [verbaCurta(), curto(verba), porExtenso(verba)],
     ["Verba média por deputado, por mês", brl(mesesV ? verba / mesesV : 0), `${comVerba.length} deputados usaram a verba`],
@@ -112,22 +138,31 @@ async function rInicio() {
 }
 
 // ---------------------------------------------------------------- ranking
-const COLS = () => [...(temSalario() ? [["total", "Custo total"], ["folha", "Salário (folha)"], ["verba", verbaCurta()]] : [["total", verbaCurta()]]), ["prev", "Previsão até dez."], ["notas", "Notas"]];
+const COLS = () => [...(M().todos ? [["uf", "Estado"]] : []), ...(temSalario() ? [["total", "Custo total"], ["folha", "Salário (folha)"], ["verba", verbaCurta()]] : [["total", verbaCurta()]]), ["prev", "Previsão até dez."], ["notas", "Notas"]];
 async function rDeputados() {
   const D = (await dados()).filter(passa);
-  const [k, s] = E.ord; D.sort((a, b) => (k === "nome" ? a.nome.localeCompare(b.nome) * -s : (a[k] - b[k]) * s));
-  kpis("#d-kpis", [["Deputados", nf(D.length), rotAno()], [temSalario() ? "Custo total" : verbaCurta(), curto(soma(D.map((d) => d.total))), ""],
+  const [k, s] = E.ord; D.sort((a, b) => (k === "nome" || k === "uf" ? String(a[k]).localeCompare(String(b[k])) * -s : (a[k] - b[k]) * s));
+  $("#d-nota").hidden = !M().todos;
+  if (M().todos) $("#d-nota").innerHTML = `<b>Todos os estados juntos.</b> O ranking começa ordenado pela <b>verba de gabinete</b>, que todas as Assembleias publicam. O custo total inclui o salário só onde a folha com o nome de cada deputado é publicada${M().sem_folha?.length ? `; os deputados ${esc(M().sem_folha_de)} aparecem com “sem salário” e não devem ser comparados pelo custo total com os outros` : ""}.`;
+  kpis("#d-kpis", [["Deputados", nf(D.length), rotAno()], [temSalario() ? "Custo total" : verbaCurta(), curto(soma(D.map((d) => d.total))), M().todos && M().sem_folha_de ? `sem o salário dos deputados ${M().sem_folha_de}` : ""],
     [temSalario() ? "Maior custo" : "Maior gasto da verba", D.length ? curto(Math.max(...D.map((d) => d.total))) : "—", ""], ["Mediana da verba", curto(mediana(D.map((d) => d.verba))), "por deputado no período"]]);
   const seta = (c) => (E.ord[0] === c ? (E.ord[1] < 0 ? " ▼" : " ▲") : "");
   $("#d-tab").innerHTML = `<thead><tr><th>#</th><th data-ord="nome">Deputado${seta("nome")}</th>${COLS().map(([c, t]) => `<th class="num" data-ord="${c}">${t}${seta(c)}</th>`).join("")}</tr></thead><tbody>${
     D.slice(0, E.lim).map((d, i) => `<tr><td>${i + 1}</td><td><a href="#" data-dep="${esc(d.id)}">${esc(d.nome)}</a> <span class="sub">${esc(d.partido || "")}${d.atual === false ? " · fora do mandato" : ""}</span></td>
-      <td class="num"><b>${brl(d.total)}</b></td>${temSalario() ? `<td class="num">${brl(d.folha)}</td><td class="num">${brl(d.verba)}</td>` : ""}<td class="num prev">${d.prev ? "+" + brl(d.prev) : "—"}</td><td class="num">${nf(d.notas)}</td></tr>`).join("")}</tbody>`;
+      ${M().todos ? `<td class="num">${esc(d.uf || "")}</td>` : ""}<td class="num"><b>${brl(d.total)}</b>${d.sem_salario ? `<div class="sub">sem salário</div>` : ""}</td>${temSalario() ? `<td class="num">${d.sem_salario ? `<span class="sub">não publicado</span>` : brl(d.folha)}</td><td class="num">${brl(d.verba)}</td>` : ""}<td class="num prev">${d.prev ? "+" + brl(d.prev) : "—"}</td><td class="num">${nf(d.notas)}</td></tr>`).join("")}</tbody>`;
   $("#d-mais").hidden = D.length <= E.lim;
 }
 const mediana = (a) => { const s = a.filter((x) => x > 0).sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 
 // ---------------------------------------------------------------- fornecedores
-async function fornecedores(a) { return (E.forn[a] = E.forn[a] || (await getJSON(`${base()}${a}/fornecedores.json`).catch(() => ({ linhas: [] })))); }
+async function fornecedores(a) {
+  if (E.forn[a]) return E.forn[a];
+  if (!todosUF()) return (E.forn[a] = await getJSON(`${base()}${a}/fornecedores.json`).catch(() => ({ linhas: [] })));
+  const m = new Map();
+  for (const e of E.estados) { const f = await getJSON(`dados/${e.id}/${a}/fornecedores.json`).catch(() => ({ linhas: [] }));
+    f.linhas.forEach(([doc, nome, tipo, total, notas, deps]) => { const o = m.get(doc); if (o) { o[3] += total; o[4] += notas; o[5] += deps; } else m.set(doc, [doc, nome, tipo, total, notas, deps]); }); }
+  return (E.forn[a] = { linhas: [...m.values()].sort((x, y) => y[3] - x[3]) });
+}
 async function rFornecedores() {
   const anos = tot() ? E.meta.anos : [E.ano], m = new Map();
   for (const a of anos) { const r = await resumo(a), F = fatorDe(r), f = await fornecedores(a);
@@ -146,6 +181,12 @@ const fmtDoc = (d) => (/^\d{14}$/.test(d) ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d
 
 // ---------------------------------------------------------------- Assembleia
 async function rAssembleia() {
+  if (M().todos) {
+    $("#a-dica").textContent = "";
+    kpis("#a-kpis", []);
+    $("#a-tab").innerHTML = `<tbody><tr><td class="quebra">A folha de pagamento é diferente em cada Assembleia (o Ceará publica com o nome de cada pessoa; a Bahia, não). Escolha um estado no alto da página para ver a da Assembleia dele.</td></tr></tbody>`;
+    return;
+  }
   $("#a-dica").textContent = temSalario() ? `A folha da ${sigla()} é nominal, mas não diz em qual gabinete trabalha cada assessor parlamentar. Por isso os assessores aparecem aqui, no total da Assembleia, e não no custo de cada deputado.` : "";
   if (!temSalario()) {
     kpis("#a-kpis", [["Folha da Assembleia", "não publicada", "sem nomes nem totais por categoria"], ...(M().subsidio ? [["Subsídio de cada deputado", brl(M().subsidio, 2), `por mês · ${M().subsidio_lei || "fixado em lei"}`]] : [])]);
@@ -166,12 +207,21 @@ async function rAssembleia() {
 const etqTipo = (t) => (t === "PJ" ? `<span class="etq pj">Empresa</span>` : t === "PF" ? `<span class="etq pf">Pessoa física</span>` : `<span class="etq">sem documento</span>`);
 const grupoForn = (doc) => { const d = String(doc || "").replace(/\D/g, ""); return d.length === 14 ? d.slice(0, 2) : "pf"; };
 const cacheJ = {};
+// índice de fornecedores de um grupo (2 primeiros dígitos do CNPJ); na visão de todos, junta os estados
+async function fornGrupo(a, g) {
+  if (!todosUF()) return jsonC(`${base()}${a}/forn/${g}.json`);
+  const out = {};
+  for (const e of E.estados) { const G = await jsonC(`dados/${e.id}/${a}/forn/${g}.json`); if (!G) continue;
+    Object.entries(G).forEach(([doc, f]) => { const o = (out[doc] = out[doc] || { nome: f.nome, tipo: f.tipo, notas: [] });
+      f.notas.forEach((n) => o.notas.push([n[0], e.id + SEP + n[1], ...n.slice(2)])); }); }
+  return out;
+}
 const jsonC = (u) => (cacheJ[u] = cacheJ[u] || getJSON(u).catch(() => null));
 // notas do deputado nos anos pedidos (em paralelo; só anos em que ele usou a verba)
 async function notasDe(id, anos) {
   const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r);
     if (!r?.deputados.some((d) => d.id === id && d.notas > 0)) return [];
-    return ((await jsonC(`${base()}${a}/notas/${encodeURIComponent(id)}.json`)) || []).map((n) => ({ ano: a, mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }));
+    return ((await jsonC(`${caminhoUF(id)}${a}/notas/${encodeURIComponent(parteId(id)[1])}.json`)) || []).map((n) => ({ ano: a, mes: n[0], emp: n[1], cat: n[2], doc: n[3], credor: n[4], valor: n[5] * F, desc: n[6] })); }));
   return lotes.flat();
 }
 function abrirFicha(html) { $("#ficha-corpo").innerHTML = html; $("#ficha").hidden = false; $("#ficha-corpo").scrollTop = 0; $(".ficha-caixa").scrollTop = 0; }
@@ -180,25 +230,28 @@ const tabelaNotas = (N, comDep, nomes) => `<div class="tabela-rolagem"><table cl
 
 async function fichaDeputado(id, anoPedido) {
   const todos = anoPedido == null && tot(), anos = todos ? E.meta.anos : [anoPedido ?? E.ano], rot = todos ? rotAno() : String(anos[0]);
+  // visão de todos os estados: a ficha fala do estado do deputado e a posição é entre os deputados do mesmo estado
+  const ufD = parteId(id)[0], mesmoUF = (x) => !todosUF() || parteId(x.id)[0] === ufD;
+  E.metaFicha = todosUF() ? E.metas[ufD] || null : null;
   const rs = await Promise.all(anos.map(resumo));
   // custo de cada ano (para o gráfico e a tabela) e posição no período
-  const porAno = rs.filter(Boolean).map((r) => { const F = fatorDe(r), L = r.deputados.filter((x) => x.id !== "nao-identificado").slice().sort((a, b) => b.total - a.total);
+  const porAno = rs.filter(Boolean).map((r) => { const F = fatorDe(r), L = r.deputados.filter((x) => !naoId(x.id) && mesmoUF(x)).slice().sort((a, b) => b.total - a.total);
     const x = r.deputados.find((y) => y.id === id); return x ? { ano: r.ano, x, F, pos: L.findIndex((y) => y.id === id) + 1, de: L.length } : null; }).filter(Boolean);
   if (!porAno.length) return;
   const D = todos ? await dados() : porAno[0].x ? [{ ...porAno[0].x }] : [];
   const d = todos ? D.find((x) => x.id === id) : (() => { const { x, F } = porAno[0]; return { ...x, folha: x.folha * F, verba: x.verba * F, total: x.total * F, prev: x.previsao?.ativo ? x.previsao.restante * F : 0,
     categorias: Object.fromEntries(Object.entries(x.categorias || {}).map(([k, v]) => [k, v * F])) }; })();
   if (!d) return;
-  const Lp = todos ? (await dados()).filter((x) => x.id !== "nao-identificado").sort((a, b) => b.total - a.total) : null;
+  const Lp = todos ? (await dados()).filter((x) => !naoId(x.id) && mesmoUF(x)).sort((a, b) => b.total - a.total) : null;
   const pos = todos ? Lp.findIndex((x) => x.id === id) + 1 : porAno[0].pos, de = todos ? Lp.length : porAno[0].de, caro = pos && pos <= Math.ceil(de / 2);
   const meses = todos ? soma(porAno.map((p) => Math.max(p.x.meses_folha, p.x.meses_verba))) : Math.max(d.meses_folha, d.meses_verba);
   const N = (await notasDe(id, anos)).sort((a, b) => (a.ano * 100 + +String(a.mes).slice(5) < b.ano * 100 + +String(b.mes).slice(5) ? 1 : -1));
   const porForn = {}; N.forEach((n) => { const o = (porForn[n.doc] = porForn[n.doc] || { nome: n.credor, v: 0, n: 0 }); o.v += n.valor; o.n++; });
   const fs = Object.entries(porForn).filter(([k]) => k).sort((a, b) => b[1].v - a[1].v);
   const cats = Object.entries(d.categorias || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  const aviso = d.id === "nao-identificado" ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
+  const aviso = naoId(d.id) ? `<p class="aviso-div">A planilha da verba da Assembleia traz estas notas com um nome que não é de nenhum deputado (por exemplo “${esc(Object.values(E.meta?.sem_casar || {}).flat().slice(0, 3).join("”, “"))}”). Mostramos para o dinheiro não sumir da conta; a correção cabe à Assembleia.</p>`
     : temSalario() && d.verba > 0 && !d.folha ? `<p class="aviso-div">Este nome aparece na planilha da verba, mas não encontramos o mesmo nome na folha de pagamento da Assembleia. Por isso o salário não está somado aqui.</p>` : "";
-  abrirFicha(`<div class="d-cab">${d.id !== "nao-identificado" ? `<img src="${base()}fotos/${esc(d.id)}.jpg" data-alt="${esc(d.foto || "")}" alt="" onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else{this.style.visibility='hidden'}">` : ""}
+  abrirFicha(`<div class="d-cab">${!naoId(d.id) ? `<img src="${caminhoUF(d.id)}fotos/${esc(parteId(d.id)[1])}.jpg" data-alt="${esc(d.foto || "")}" alt="" onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt=''}else{this.style.visibility='hidden'}">` : ""}
       <div><h2>${esc(d.nome)}</h2><div class="sub">${esc(d.partido || "")}${d.nome_completo ? " · " + esc(d.nome_completo) : ""} · ${todos ? `${porAno.length} ano(s) com dados entre ${rot}` : `${meses} ${meses === 1 ? "mês" : "meses"} com dados em ${rot}`}</div>
         ${pos ? `<div class="selo-pos ${caro ? "" : "barato"}">${rotPos(pos, caro, de)} entre ${de} deputados estaduais ${doEstado()} ${todos ? "(soma de todos os anos)" : "em " + rot}</div>` : ""}</div></div>
     ${aviso}
@@ -230,7 +283,7 @@ async function fichaDeputado(id, anoPedido) {
     if (cats[0]) destaques.push([`Maior gasto da verba: ${cats[0][0]}`, brl(cats[0][1]), "#107c41"]);
     CartaoQC.abrir({
       titulo: `${temSalario() ? (todos ? `Custo de todos os anos (${rot})` : `Custo do mandato em ${rot}`) : `${verbaNome()} ${todos ? `(${rot})` : `em ${rot}`}`} · Deputado estadual`,
-      nome: d.nome, foto: d.id !== "nao-identificado" ? `${base()}fotos/${d.id}.jpg` : "", semFoto: d.id === "nao-identificado",
+      nome: d.nome, foto: !naoId(d.id) ? `${caminhoUF(d.id)}fotos/${parteId(d.id)[1]}.jpg` : "", semFoto: naoId(d.id),
       linhas: [[d.partido, casa()].filter(Boolean).join(" · "), meses ? `${meses} mês(es) com dados${todos ? "" : " em " + rot}` : ""],
       faixa: pos ? { titulo: rotPos(pos, caro, de), sub: `entre ${de} deputados estaduais ${doEstado()} · ${todos ? "todos os anos" : "em " + rot}`, cor: caro ? "#c4161c" : "#107c41" } : null,
       valorRot: temSalario() ? "Custou aos cofres públicos" : `Gastou da ${verbaNome().toLowerCase()}`, valor: d.total, valorSub: meses ? `${brl(d.total / meses)} por mês, em média` : "",
@@ -243,9 +296,10 @@ async function fichaDeputado(id, anoPedido) {
 }
 
 async function fichaFornecedor(doc, anoPedido) {
+  E.metaFicha = null;
   const todos = anoPedido == null && tot(), anos = todos ? E.meta.anos : [anoPedido ?? E.ano], rot = todos ? rotAno() : String(anos[0]), g = grupoForn(doc);
   abrirFicha(`<p class="sub">Carregando…</p>`);
-  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r), G = await jsonC(`${base()}${a}/forn/${g}.json`), f = G?.[doc];
+  const lotes = await Promise.all(anos.map(async (a) => { const r = await resumo(a), F = fatorDe(r), G = await fornGrupo(a, g), f = G?.[doc];
     return f ? { ano: a, F, f } : null; }));
   const L = lotes.filter(Boolean);
   if (!L.length) { abrirFicha(`<p class="sub">Este fornecedor não recebeu da verba em ${rot}.</p>`); return; }
@@ -277,13 +331,13 @@ async function render() {
 }
 async function rMetodo() {
   const M = E.meta?.meses || {}, rec = Object.values(M), n = soma(rec.map((x) => x.recusadas)), v = soma(rec.map((x) => x.recusadas_valor));
-  const vazios = Object.entries(M).filter(([, x]) => !x.verba).map(([k]) => mesBR(k));
+  const vazios = Object.entries(M).filter(([, x]) => !x.verba).map(([k]) => (k.includes(" ") ? `${k.split(" ")[0]} ${mesBR(k.split(" ")[1])}` : mesBR(k)));
   const semCasar = Object.entries(E.meta?.sem_casar || {}).filter(([, l]) => l.length).map(([a, l]) => `${a}: ${l.map((x) => `“${x}”`).join(", ")}`);
   const soVerba = [];
-  for (const a of temSalario() ? E.meta?.anos || [] : []) { const r = await resumo(a); (r?.deputados || []).forEach((d) => { if (d.verba > 0 && !d.folha && d.id !== "nao-identificado") soVerba.push(`${d.nome} (${a})`); }); }
-  $$("[data-uf-texto]").forEach((el) => (el.hidden = el.dataset.ufTexto !== E.uf));
+  for (const a of temSalario() ? E.meta?.anos || [] : []) { const r = await resumo(a); (r?.deputados || []).forEach((d) => { if (d.verba > 0 && !d.folha && !d.sem_salario && !naoId(d.id)) soVerba.push(`${d.nome} (${a})`); }); }
+  $$("[data-uf-texto]").forEach((el) => (el.hidden = !todosUF() && el.dataset.ufTexto !== E.uf));
   const semDet = await semFornecedor();
-  $("#m-recusadas").innerHTML = `<b>Divergências encontradas nos dados da ${esc(casa())}</b> (avisamos sempre que a informação falta ou não fecha):<ul>
+  $("#m-recusadas").innerHTML = `<b>Divergências encontradas nos dados ${E.meta?.todos ? "das" : "da"} ${esc(casa())}</b> (avisamos sempre que a informação falta ou não fecha):<ul>
     <li>${nf(n)} linha(s) do arquivo da verba não eram de um deputado e ficaram de fora (${brl(v, 2)}), em ${nf(rec.length)} mês(es) baixados.</li>
     ${semCasar.length ? `<li>Nomes na planilha da verba que não são de nenhum deputado identificável, somados em “Nome não identificado na planilha”: ${esc(semCasar.join(" · "))}.</li>` : ""}
     ${soVerba.length ? `<li>Aparecem na verba com um nome que não encontramos na folha de pagamento, por isso sem salário ligado: ${esc(soVerba.join(", "))}.</li>` : ""}
@@ -291,7 +345,7 @@ async function rMetodo() {
     ${vazios.length ? `<li>Meses ainda sem notas da verba publicadas pela Assembleia: ${esc(vazios.join(", "))}.</li>` : ""}</ul>`;
 }
 async function semFornecedor() {
-  if (temSalario()) return 0;
+  if (temSalario() && !E.meta?.todos) return 0;
   return soma(await Promise.all((E.meta?.anos || []).map(async (a) => (await resumo(a))?.sem_fornecedor || 0)));
 }
 function irPara(p) {
@@ -306,15 +360,35 @@ async function iniciar() {
   E.estados = est?.estados?.length ? est.estados : [{ id: "ce", estado: "Ceará" }];
   const pedidoUF = new URL(location).searchParams.get("uf");
   let lembrado = null; try { lembrado = localStorage.getItem("qc-estaduais-uf"); } catch (e) { /* sem armazenamento */ }
-  E.uf = [pedidoUF, lembrado].find((u) => u && E.estados.some((e) => e.id === u)) || E.estados[0].id;
-  $("#f-uf").innerHTML = E.estados.map((e) => `<option value="${esc(e.id)}">${esc(e.estado)}</option>`).join("");
+  const validos = E.estados.length > 1 ? ["todos", ...E.estados.map((e) => e.id)] : E.estados.map((e) => e.id);
+  E.uf = [pedidoUF, lembrado].find((u) => u && validos.includes(u)) || validos[0];
+  $("#f-uf").innerHTML = (E.estados.length > 1 ? `<option value="todos">Todos os estados</option>` : "") + E.estados.map((e) => `<option value="${esc(e.id)}">${esc(e.estado)}</option>`).join("");
   $("#f-uf").value = E.uf;
   $("#estados-lista").textContent = E.estados.map((e) => e.estado).join(" e ").replace(/ e (?=.* e )/g, ", ");
   await carregarEstado();
 }
+// meta da visão de todos os estados, montado a partir dos metas de cada estado
+function metaTodos() {
+  const ms = E.estados.map((e) => E.metas[e.id]).filter(Boolean);
+  const nomes = ms.map((m) => m.estado), lista = nomes.join(" e ").replace(/ e (?=.* e )/g, ", ");
+  const anos = [...new Set(ms.flatMap((m) => m.anos))].sort();
+  const semFolha = ms.filter((m) => m.salario === false).map((m) => m.estado);
+  const semFolhaDe = ms.filter((m) => m.salario === false).map((m) => m.do_estado).join(" e ");
+  return { todos: true, estado: "Todos os estados", do_estado: `(${lista})`, casa: `Assembleias Legislativas (${lista})`, sigla: "Assembleias",
+    salario: true, sem_folha: semFolha, sem_folha_de: semFolhaDe, verba: "Verba de gabinete", verba_curta: "Verba de gabinete", desde: Math.min(...ms.map((m) => m.desde || m.anos[0])),
+    anos, ipca: ms[0].ipca, gerado_em: ms.map((m) => m.gerado_em).sort().pop(),
+    limite: ms.map((m) => `${m.estado}: ${m.limite}`).join(" "),
+    meses: Object.fromEntries(ms.flatMap((m) => Object.entries(m.meses || {}).map(([k, v]) => [`${m.uf} ${k}`, v]))),
+    sem_casar: Object.fromEntries(ms.flatMap((m) => Object.entries(m.sem_casar || {}).map(([a, l]) => [`${m.estado} ${a}`, l]))), pessoal_assembleia: {} };
+}
 async function carregarEstado() {
-  E.res = {}; E.forn = {}; E.meta = null;
-  try { E.meta = await getJSON(`${base()}meta.json`); } catch { $("#aviso").hidden = false; $("#aviso").textContent = "Os dados ainda estão sendo coletados pelo robô. Volte em algumas horas."; irPara("metodo"); return; }
+  E.res = {}; E.forn = {}; E.meta = null; E.metaFicha = null; E.metas = E.metas || {};
+  if (todosUF()) {
+    await Promise.all(E.estados.map(async (e) => { if (!E.metas[e.id]) E.metas[e.id] = await getJSON(`dados/${e.id}/meta.json`).catch(() => null); }));
+    E.ord = ["verba", -1];
+  }
+  try { E.meta = todosUF() ? metaTodos() : await getJSON(`${base()}meta.json`); if (!todosUF()) E.metas[E.uf] = E.meta; } catch { $("#aviso").hidden = false; $("#aviso").textContent = "Os dados ainda estão sendo coletados pelo robô. Volte em algumas horas."; irPara("metodo"); return; }
+  if (!todosUF() && (E.ord[0] === "uf" || (!temSalario() && ["verba", "folha"].includes(E.ord[0])))) E.ord = ["total", -1];
   const anos = E.meta.anos.slice().reverse();
   const pedido = new URL(location).searchParams.get("ano");
   E.ano = pedido && (pedido === "total" || anos.includes(+pedido)) ? (pedido === "total" ? "total" : +pedido) : anos[0];
@@ -346,8 +420,8 @@ $("#f-busca").oninput = () => { E.lim = 30; render(); };
 $("#f-q").oninput = () => { E.limF = 50; rFornecedores(); };
 $("#d-mais").onclick = () => { E.lim += 50; rDeputados(); };
 $("#f-mais").onclick = () => { E.limF += 100; rFornecedores(); };
-$("#ficha-fechar").onclick = () => ($("#ficha").hidden = true);
-$("#ficha").onclick = (e) => { if (e.target.id === "ficha") $("#ficha").hidden = true; };
+$("#ficha-fechar").onclick = () => { $("#ficha").hidden = true; E.metaFicha = null; };
+$("#ficha").onclick = (e) => { if (e.target.id === "ficha") { $("#ficha").hidden = true; E.metaFicha = null; } };
 $("#abrir-menu").onclick = () => { $("#menu").classList.add("aberto"); $("#veu").hidden = false; };
 $("#veu").onclick = () => { $("#menu").classList.remove("aberto"); $("#veu").hidden = true; };
 iniciar();
