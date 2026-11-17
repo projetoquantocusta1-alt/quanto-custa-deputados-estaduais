@@ -9,6 +9,10 @@ on:
         description: "Baixar de novo todos os meses (sim/não)"
         required: false
         default: "não"
+      uf:
+        description: "Estado só (ce, ba, rn) ou vazio para todos"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,7 +35,8 @@ jobs:
         run: python -m pytest -q tests
       - name: Coletar nas Assembleias (Ceará, Bahia e Rio Grande do Norte) e montar o site
         run: |
-          if [ "${{ github.event.inputs.forcar }}" = "sim" ]; then python atualizar.py --minutos 170 --forcar; else python atualizar.py --minutos 170; fi
+          UF="${{ github.event.inputs.uf }}"; ARG=""; [ -n "$UF" ] && ARG="--uf $UF"
+          if [ "${{ github.event.inputs.forcar }}" = "sim" ]; then python atualizar.py --minutos 170 --forcar $ARG; else python atualizar.py --minutos 170 $ARG; fi
       - name: Publicar
         if: always()
         run: |

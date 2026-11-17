@@ -710,6 +710,9 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     hoje = date.today()
     ufs = list(config.CASAS) if args.uf == "todas" else [args.uf]
+    # coleta a Bahia por último: ela é a mais lenta (verba nota a nota, uma por segundo) e, indo antes,
+    # consumia o tempo dos outros estados. A ordem de exibição no site não muda (gravar_estados ordena).
+    ufs.sort(key=lambda u: u == "ba")
     t0, limite = time.time(), args.minutos * 60
     if not args.so_montar:
         atualizar_ipca()
