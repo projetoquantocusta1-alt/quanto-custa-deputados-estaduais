@@ -693,9 +693,12 @@ def gravar_estados(uf: str, gerado: str, anos: list[int]):
     """Lista dos estados publicados, para o seletor do site (só entra quem já tem dados montados)."""
     atual = {e["id"]: e for e in (ler(SAIDA_RAIZ / "estados.json", {}) or {}).get("estados", [])}
     c = config.CASAS[uf]
-    atual[uf] = {"id": uf, "uf": c["uf"], "estado": c["estado"], "do_estado": c["do_estado"], "casa": c["nome"],
-                 "sigla": c["sigla"], "vagas": c["vagas"], "desde": c["desde"], "salario": c["salario"],
-                 "anos": anos, "gerado_em": gerado}
+    if anos:
+        atual[uf] = {"id": uf, "uf": c["uf"], "estado": c["estado"], "do_estado": c["do_estado"], "casa": c["nome"],
+                     "sigla": c["sigla"], "vagas": c["vagas"], "desde": c["desde"], "salario": c["salario"],
+                     "anos": anos, "gerado_em": gerado}
+    else:
+        atual.pop(uf, None)   # estado sem dados montados não entra (nem fica) no seletor do site
     ordem = list(config.CASAS)
     gravar(SAIDA_RAIZ / "estados.json", {"estados": sorted(atual.values(), key=lambda e: ordem.index(e["id"]) if e["id"] in ordem else 99)})
 
