@@ -1,4 +1,4 @@
-/* Projeto Quanto Custa — Deputados estaduais (um estado por vez: dados/<uf>/) */
+/* Quanto Custa — Deputados estaduais (um estado por vez: dados/<uf>/) */
 (() => {
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);

@@ -1,4 +1,4 @@
-"""Projeto Quanto Custa — Deputados estaduais (configuração).
+"""Quanto Custa — Deputados estaduais (configuração).
 
 Um estado por vez. Cada Assembleia tem a sua entrada em CASAS (abaixo) e o seu módulo em
 coletor/ (Ceará: alece.py; Bahia: alba.py). O site lê docs/dados/<uf>/ de cada estado.
