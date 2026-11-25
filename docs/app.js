@@ -398,7 +398,7 @@ async function carregarEstado() {
   $("#f-ano").innerHTML = `<option value="total">Todos os anos (desde ${E.meta.desde || E.meta.anos[0]})</option>` + anos.map((a) => `<option value="${a}">${a}</option>`).join("");
   $("#f-ano").value = E.ano;
   if (E.meta.ipca?.referencia) $("#ipca-ref").textContent = `IPCA até ${E.meta.ipca.referencia}`;
-  $("#atualizado").textContent = `Atualizado em ${new Date(E.meta.gerado_em).toLocaleString("pt-BR")}`;
+  $("#atualizado").textContent = `Atualizado em ${new Date(E.meta.gerado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`;
   const todos = (await Promise.all(anos.map(resumo))).filter(Boolean).flatMap((r) => r.deputados);
   $("#f-partido").innerHTML = `<option value="">Todos</option>` + [...new Set(todos.map((d) => d.partido).filter(Boolean))].sort().map((u) => `<option>${esc(u)}</option>`).join("");
   const h = location.hash.slice(1), md = h.match(/^dep-(.+)$/), mf = h.match(/^forn-(.+)$/);
