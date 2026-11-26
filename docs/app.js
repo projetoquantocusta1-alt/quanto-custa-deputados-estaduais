@@ -64,10 +64,13 @@ async function resumo(a) {
     ["folha", "verba", "total", "deputados"].forEach((k) => (out.totais[k] += r.totais?.[k] || 0));
     out.sem_fornecedor += r.sem_fornecedor || 0;
     if (!out.ultimo_mes || (r.ultimo_mes || "") > out.ultimo_mes) out.ultimo_mes = r.ultimo_mes;
+    if (r.ultimo_mes) (out.mes_por_uf = out.mes_por_uf || {})[e.estado || e.uf || e.id.toUpperCase()] = r.ultimo_mes;
+    if (r.previsao) { out.ult_por_uf = out.ult_por_uf || {}; out.ult_por_uf[e.uf || e.id.toUpperCase()] = r.previsao.ult_folha; }
     if (r.previsao) prev = prev ? { ult_folha: Math.min(prev.ult_folha, r.previsao.ult_folha), ult_verba: Math.max(prev.ult_verba, r.previsao.ult_verba),
       restante: prev.restante + r.previsao.restante, folha: prev.folha + r.previsao.folha, verba: prev.verba + r.previsao.verba } : { ...r.previsao };
   });
   out.previsao = prev;
+  if (prev) prev.ult_por_uf = out.ult_por_uf;
   out.deputados.sort((x, y) => y.total - x.total);
   return (E.res[a] = out);
 }
@@ -101,12 +104,24 @@ async function rInicio() {
     : temSalario() ? `Os deputados estaduais ${doEstado()} custaram em ${E.ano}` : `Os deputados estaduais ${doEstado()} gastaram da ${verbaNome().toLowerCase()} em ${E.ano}`;
   const r = tot() ? null : E.res[E.ano], prev = r?.previsao, rest = prev ? soma(D.map((d) => d.prev || 0)) : 0;
   cancelAnimationFrame(E.tick);
-  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}${M().todos ? `Salário bruto (folha) + verba de gabinete. ${M().sem_folha?.length ? `Sem o salário dos deputados ${M().sem_folha_de}: a Assembleia não publica a folha com o nome de cada deputado; por isso a soma é um piso` : ""}` : temSalario() ? "Salário bruto (folha) + verba de desempenho parlamentar" : `Só a ${verbaNome().toLowerCase()}: a ${sigla()} não publica a folha de pagamento com o nome de cada deputado, por isso o salário não está somado`}. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}` : ""}.`;
+  // "Todos os estados": avisa quem publicou menos meses (ex.: RN até setembro enquanto CE e BA vão até novembro)
+  const mpu = !tot() && M().todos ? E.res[E.ano]?.mes_por_uf || {} : {};
+  const atr = Object.entries(mpu).filter(([, m]) => ult && m < ult);
+  const atrasados = atr.length ? ` (${atr.map(([n, m]) => `${n}: até ${mesBR(m)}`).join("; ")})` : "";
+  const nota = `${corrigir() ? "Em valores de hoje (IPCA). " : ""}${M().todos ? `Salário bruto (folha) + verba de gabinete. ${M().sem_folha?.length ? `Sem o salário dos deputados ${M().sem_folha_de}: a Assembleia não publica a folha com o nome de cada deputado; por isso a soma é um piso` : ""}` : temSalario() ? "Salário bruto (folha) + verba de desempenho parlamentar" : `Só a ${verbaNome().toLowerCase()}: a ${sigla()} não publica a folha de pagamento com o nome de cada deputado, por isso o salário não está somado`}. Não inclui a equipe do gabinete${ult ? ` · dados até ${mesBR(ult)}${atrasados}` : ""}.`;
   if (prev && rest > 0) {
     // corre em tempo real: do 1º dia depois da última folha publicada até 31/12, no ritmo da previsão
-    const ini = new Date(r.ano, prev.ult_folha, 1).getTime(), fim = new Date(r.ano + 1, 0, 1).getTime();
-    const porSeg = rest / ((fim - ini) / 1000);
-    const passo = () => { const v = Math.min(T + rest, T + Math.max(0, (Date.now() - ini) / 1000) * porSeg);
+    // "Todos os estados": cada estado corre a partir do mês seguinte à última folha publicada por ELE
+    // (um estado atrasado não pode puxar o início dos outros para trás)
+    const fim = new Date(r.ano + 1, 0, 1).getTime(), porUF = prev.ult_por_uf || {};
+    const ufs = M().todos && Object.keys(porUF).length ? Object.keys(porUF) : [null];
+    const blocos = ufs.map((u) => {
+      const ini = new Date(r.ano, u ? porUF[u] : prev.ult_folha, 1).getTime();
+      const resto = u ? soma(D.filter((d) => d.uf === u).map((d) => d.prev || 0)) : rest;
+      return { ini, resto, seg: fim > ini ? resto / ((fim - ini) / 1000) : 0 };
+    });
+    const porSeg = soma(blocos.filter((b) => Date.now() >= b.ini).map((b) => b.seg)) || soma(blocos.map((b) => b.seg));
+    const passo = () => { const v = Math.min(T + rest, T + soma(blocos.map((b) => Math.min(b.resto, Math.max(0, (Date.now() - b.ini) / 1000) * b.seg))));
       $("#i-total").textContent = brl(v); $("#i-ext").textContent = porExtenso(v);
       if (E.pag === "inicio") E.tick = requestAnimationFrame(passo); };
     passo();

@@ -49,6 +49,7 @@ details.equipe summary { cursor: pointer; font-weight: 700; color: #2463A6; }
 .coleta-aviso { display: inline-flex; align-items: center; gap: 8px; margin: 4px auto 14px; padding: 6px 14px; border-radius: 999px; background: #FFF6E5; border: 1px solid #E8C27A; color: #6b4a12; font-size: 13px; }
 .coleta-aviso b { color: #4a3208; }
 .coleta-aviso .vis-ponto { background: #D69A32; box-shadow: none; }
+@media (max-width: 860px) { .coleta-aviso { border-radius: 12px; text-align: left; align-items: flex-start; } .coleta-aviso .vis-ponto { margin-top: 6px; flex-shrink: 0; } }
 .aviso-div { background: #FDF0EF; border: 1px solid #E3A6A0; border-left: 5px solid #C84C4C; border-radius: 10px; padding: 10px 14px; color: #4a1f1b; font-size: 14px; margin: 0 0 12px; }
 #m-recusadas ul { margin: 6px 0; padding-left: 18px; } #m-recusadas li { margin: 4px 0; }
 
