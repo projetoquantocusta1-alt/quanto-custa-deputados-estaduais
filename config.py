@@ -113,6 +113,24 @@ ALRN = {
     "perfil": "https://www.al.rn.leg.br/deputado/{codigo}/{slug}",
 }
 
+# --- Minas Gerais (ALMG) ---
+# A API de dados abertos da ALMG não traz a verba; ela fica no portal almg.gov.br, com uma página de detalhe por
+# deputado (nota a nota: fornecedor, CNPJ/CPF, data, número e valor reembolsável). O portal responde aos robôs do
+# GitHub (ao contrário do de São Paulo). A folha nominal não é usada; o subsídio é o teto constitucional (75% do
+# subsídio do deputado federal, hoje R$ 34.774,64).
+ALMG = {
+    "uf": "MG",
+    "nome": "Assembleia Legislativa de Minas Gerais",
+    "sigla": "ALMG",
+    "legislatura": 20,   # 20ª legislatura: 2023-2027
+    "lista": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/?leg={leg}",
+    "detalhe": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/detalhe.html?id={id}&ano={ano}",
+    "verba_pagina": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/",
+    "deputados_pagina": "https://www.almg.gov.br/a-assembleia/deputados/inicial/",
+    "perfil": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/detalhe.html?id={slug}",
+}
+
+
 # Estados publicados no site (ordem do seletor). "limite" explica por que os dados começam no ano "desde".
 CASAS = {
     "ce": {
@@ -149,5 +167,17 @@ CASAS = {
                    "cada deputado; por isso mostramos só a cota. Os números vêm do portal de transparência da ALRN, que "
                    "exige uma chave de acesso embutida no próprio código do site; o robô usa essa mesma chave pública "
                    "para ler os dados abertos."),
+    },
+    "mg": {
+        "uf": "MG", "estado": "Minas Gerais", "do_estado": "de Minas Gerais", "nome": ALMG["nome"], "sigla": "ALMG",
+        "vagas": 77, "desde": 2023, "salario": False, "subsidio": 34774.64,
+        "subsidio_lei": "teto constitucional (art. 27, §2º): 75% do subsídio do deputado federal",
+        "verba": "Verba indenizatória", "verba_curta": "Verba indenizatória",
+        "perfil": ALMG["perfil"],
+        "fontes": {"verba": ALMG["verba_pagina"], "deputados": ALMG["deputados_pagina"]},
+        "limite": ("Dados desde janeiro de 2023, início da legislatura atual, para comparar com os outros estados no "
+                   "mesmo período. A Assembleia de Minas publica a verba indenizatória nota a nota, com fornecedor e "
+                   "valor, mas não a folha de pagamento com o salário de cada deputado; por isso mostramos a verba e o "
+                   "subsídio fixado em lei (hoje, R$ 34.774,64 por mês, o teto de 75% do salário do deputado federal)."),
     },
 }

@@ -32,7 +32,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import config
-from coletor import alba, alece, alrn, http, ipca
+from coletor import alba, alece, almg, alrn, http, ipca
 from coletor.privacidade import limpar_json
 
 RAIZ = Path(__file__).parent
@@ -506,6 +506,84 @@ def meses_rn() -> list[dict]:
     return [d for p in sorted((B_RN / "meses").glob("*.json")) if (d := ler(p))]
 
 
+# ------------------------------------------------------------------ Minas Gerais (ALMG)
+B_MG = BRUTOS_RAIZ / "mg"
+
+
+def atualizar_cadastro_mg() -> dict:
+    """Deputados da legislatura atual (lista da verba, ?leg=20). Chave: nome parlamentar (alece.chave)."""
+    cad = ler(B_MG / "cadastro.json", {}) or {}
+    try:
+        deps = almg.ler_deputados(almg.baixar_lista())
+    except Exception as e:  # noqa: BLE001
+        log.warning("MG: lista de deputados indisponível (%s); mantém a anterior", e)
+        return cad
+    if not deps:
+        log.warning("MG: lista de deputados veio vazia; mantém a anterior")
+        return cad
+    for d in deps:
+        k = alece.chave(d["nome"])
+        x = cad.get(k, {})
+        x["nome"] = d["nome"]
+        x["slug"] = d["codigo"]
+        x["url"] = config.ALMG["perfil"].format(slug=d["codigo"])
+        x["atual"] = True
+        x["visto_em"] = date.today().isoformat()
+        cad[k] = x
+    gravar(B_MG / "cadastro.json", cad)
+    log.info("MG: %d deputados na legislatura", len(deps))
+    return cad
+
+
+def coletar_mg(hoje: date, limite_s: float, forcar: bool = False) -> int:
+    """Verba de cada deputado, ano a ano (detalhe.html?id=&ano=). Anos fechados não mudam: só o ano corrente e o
+    anterior são refeitos (ou tudo, com --forcar)."""
+    t0, feitos = time.time(), 0
+    cad = ler(B_MG / "cadastro.json", {}) or {}
+    codigos = [(k, x["slug"]) for k, x in cad.items() if x.get("slug")]
+    for ano in range(config.CASAS["mg"]["desde"], hoje.year + 1):
+        for k, cod in codigos:
+            if time.time() - t0 > limite_s:
+                log.warning("MG: tempo esgotado; o resto fica para a próxima execução")
+                return feitos
+            arq = B_MG / "verba" / f"{cod}-{ano}.json"
+            velho = ler(arq)
+            if velho and not forcar and ano < hoje.year - 1:
+                continue
+            try:
+                itens = almg.ler_detalhe(almg.baixar_detalhe(cod, ano))
+            except http.SiteForaDoAr as e:
+                log.error("MG: %s", e)
+                return feitos
+            except Exception as e:  # noqa: BLE001
+                log.warning("MG %s/%d: detalhe falhou (%s)", cod, ano, e)
+                continue
+            if not itens and velho and velho.get("itens"):
+                log.warning("MG %s/%d: veio vazio agora, mas já tinha notas; mantém o antigo", cod, ano)
+                continue
+            gravar(arq, {"codigo": cod, "nome": cad[k]["nome"], "ano": ano, "baixado_em": hoje.isoformat(), "itens": itens})
+            feitos += 1
+    log.info("MG: %d arquivos de verba atualizados", feitos)
+    return feitos
+
+
+def meses_mg() -> list[dict]:
+    """Notas da verba de MG no formato comum (sem folha). Agrupa as notas de todos os deputados por ano/mês
+    (pela data da nota)."""
+    por_mes: dict[tuple, list] = defaultdict(list)
+    for arq in sorted((B_MG / "verba").glob("*.json")):
+        reg = ler(arq) or {}
+        dep = reg.get("nome", "")
+        for it in reg.get("itens", []):
+            por_mes[(it["ano"], it["mes"])].append(
+                {"deputado": dep, "periodo": f"{it['ano']}-{it['mes']:02d}", "empenho": it.get("nota", ""),
+                 "descricao": f"Nota {it['nota']}" if it.get("nota") else "Nota sem número",
+                 "doc": it.get("doc", ""), "tipo": it.get("tipo", "?"),
+                 "credor": it.get("fornecedor", ""), "valor": it["valor"], "categoria": "Verba indenizatória"})
+    return [{"ano": ano, "mes": mes, "vdp": vdp, "recusadas": [], "folha": {"deputados": [], "categorias": {}}}
+            for (ano, mes), vdp in sorted(por_mes.items())]
+
+
 # ------------------------------------------------------------------ montagem
 def meses_ce() -> list[dict]:
     return [d for p in sorted((BRUTOS / "meses").glob("*.json")) if (d := ler(p))]
@@ -708,14 +786,14 @@ def main(argv=None):
     ap.add_argument("--so-montar", action="store_true")
     ap.add_argument("--forcar", action="store_true", help="baixa de novo todos os meses")
     ap.add_argument("--minutos", type=float, default=90)
-    ap.add_argument("--uf", default="todas", help="ce, ba, rn ou todas")
+    ap.add_argument("--uf", default="todas", help="ce, ba, rn, mg ou todas")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     hoje = date.today()
     ufs = list(config.CASAS) if args.uf == "todas" else [args.uf]
     # coleta a Bahia por último: ela é a mais lenta (verba nota a nota, uma por segundo) e, indo antes,
     # consumia o tempo dos outros estados. A ordem de exibição no site não muda (gravar_estados ordena).
-    ufs.sort(key=lambda u: u == "ba")
+    ufs.sort(key=lambda u: u in ("ba", "mg"))
     t0, limite = time.time(), args.minutos * 60
     if not args.so_montar:
         atualizar_ipca()
@@ -736,6 +814,11 @@ def main(argv=None):
                 if not args.so_montar:
                     coletar_rn(hoje, resta, args.forcar)
                 montar(hoje, "rn", meses_rn())
+            elif uf == "mg":
+                if not args.so_montar:
+                    atualizar_cadastro_mg()
+                    coletar_mg(hoje, resta, args.forcar)
+                montar(hoje, "mg", meses_mg())
         except Exception:  # noqa: BLE001
             log.error("%s: falhou; os outros estados seguem", uf.upper())
             traceback.print_exc()
