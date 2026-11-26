@@ -92,7 +92,7 @@ async function dados() {
 const passa = (d) => { const p = $("#f-partido").value, q = semAcento($("#f-busca").value.trim());
   return (!p || d.partido === p) && (!q || semAcento(d.nome + " " + (d.nome_completo || "")).includes(q)); };
 const rotAno = () => (tot() ? `${E.meta.anos[0]}–${E.meta.anos[E.meta.anos.length - 1]}` : E.ano);
-function kpis(el, itens) { $(el).innerHTML = itens.map(([r, v, o]) => `<div class="kpi"><div class="rot">${r}</div><div class="val num">${v}</div><div class="obs">${o || ""}</div></div>`).join(""); }
+function kpis(el, itens) { $(el).innerHTML = itens.map(([r, v, o]) => `<div class="kpi"><div class="rot">${esc(r)}</div><div class="val num">${v}</div><div class="obs">${esc(o || "")}</div></div>`).join(""); }
 function grafico(id, cfg) { E.graf[id]?.destroy(); E.graf[id] = new Chart($("#" + id), cfg); }
 const tipBRL = { callbacks: { label: (c) => `${c.dataset.label ? c.dataset.label + ": " : ""}${brl(c.parsed.x ?? c.parsed.y ?? c.parsed)}` } };
 const ultimoMes = async () => { const r = await resumo(E.meta.anos[E.meta.anos.length - 1]); return r?.ultimo_mes; };
