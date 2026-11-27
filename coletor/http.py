@@ -5,15 +5,22 @@ nesta execução e as próximas chamadas a ele falham na hora, em vez de
 gastar minutos tentando de novo cada uma.
 """
 import io
+import socket
 import time
 import zipfile
 from urllib.parse import urlparse
 
 import requests
+import urllib3.util.connection as _urllib3_conn
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 import config
+
+# Força IPv4: alguns sites do governo (ex.: www.almg.gov.br) resolvem também um endereço IPv6, e os runners do
+# GitHub Actions nem sempre têm rota IPv6 — a conexão falha com "Network is unreachable" (Errno 101). Usar só IPv4
+# resolve e não muda nada para os demais sites.
+_urllib3_conn.allowed_gai_family = lambda: socket.AF_INET
 
 LIMITE_FALHAS_SEGUIDAS = 4
 LIMITE_FALHAS_TOTAL = 10   # site instável: desiste depois de 10 falhas na execução
