@@ -536,47 +536,49 @@ def atualizar_cadastro_mg() -> dict:
 
 
 def coletar_mg(hoje: date, limite_s: float, forcar: bool = False) -> int:
-    """Verba de cada deputado, ano a ano (detalhe.html?id=&ano=). Anos fechados não mudam: só o ano corrente e o
-    anterior são refeitos (ou tudo, com --forcar)."""
+    """Verba de cada deputado, MÊS a MÊS (o detalhe da ALMG mostra um período MMAAAA por vez). Do mês mais recente
+    para o mais antigo; meses fechados já coletados não são refeitos (só os MESES_REBAIXAR mais recentes, ou tudo
+    com --forcar). O que já foi salvo fica para sempre; a coleta continua na próxima execução se o tempo acabar."""
     t0, feitos = time.time(), 0
     cad = ler(B_MG / "cadastro.json", {}) or {}
     codigos = [(k, x["slug"]) for k, x in cad.items() if x.get("slug")]
-    for ano in range(config.CASAS["mg"]["desde"], hoje.year + 1):
+    for a, m in reversed(list(meses(config.CASAS["mg"]["desde"], hoje))):
         for k, cod in codigos:
             if time.time() - t0 > limite_s:
                 log.warning("MG: tempo esgotado; o resto fica para a próxima execução")
                 return feitos
-            arq = B_MG / "verba" / f"{cod}-{ano}.json"
+            arq = B_MG / "verba" / f"{cod}-{a}-{m:02d}.json"
             velho = ler(arq)
-            if velho and not forcar and ano < hoje.year - 1:
+            if velho and not forcar and idade_meses(a, m, hoje) > config.MESES_REBAIXAR:
                 continue
             try:
-                itens = almg.ler_detalhe(almg.baixar_detalhe(cod, ano))
+                itens = almg.ler_detalhe(almg.baixar_detalhe(cod, f"{m:02d}{a}"))
             except http.SiteForaDoAr as e:
                 log.error("MG: %s", e)
                 return feitos
             except Exception as e:  # noqa: BLE001
-                log.warning("MG %s/%d: detalhe falhou (%s)", cod, ano, e)
+                log.warning("MG %s %d-%02d: detalhe falhou (%s)", cod, a, m, e)
                 continue
             if not itens and velho and velho.get("itens"):
-                log.warning("MG %s/%d: veio vazio agora, mas já tinha notas; mantém o antigo", cod, ano)
                 continue
-            gravar(arq, {"codigo": cod, "nome": cad[k]["nome"], "ano": ano, "baixado_em": hoje.isoformat(), "itens": itens})
+            gravar(arq, {"codigo": cod, "nome": cad[k]["nome"], "ano": a, "mes": m, "baixado_em": hoje.isoformat(), "itens": itens})
             feitos += 1
-    log.info("MG: %d arquivos de verba atualizados", feitos)
+    log.info("MG: %d arquivos de verba (deputado×mês) atualizados", feitos)
     return feitos
 
 
 def meses_mg() -> list[dict]:
-    """Notas da verba de MG no formato comum (sem folha). Agrupa as notas de todos os deputados por ano/mês
-    (pela data da nota)."""
+    """Notas da verba de MG no formato comum (sem folha). Cada arquivo é um deputado num mês (a competência pedida);
+    agrupa por esse mês. As notas podem ter data de emissão de meses anteriores, mas a competência é a do período."""
     por_mes: dict[tuple, list] = defaultdict(list)
     for arq in sorted((B_MG / "verba").glob("*.json")):
         reg = ler(arq) or {}
-        dep = reg.get("nome", "")
+        dep, a, m = reg.get("nome", ""), reg.get("ano"), reg.get("mes")
+        if a is None or m is None:
+            continue
         for it in reg.get("itens", []):
-            por_mes[(it["ano"], it["mes"])].append(
-                {"deputado": dep, "periodo": f"{it['ano']}-{it['mes']:02d}", "empenho": it.get("nota", ""),
+            por_mes[(a, m)].append(
+                {"deputado": dep, "periodo": f"{a}-{m:02d}", "empenho": it.get("nota", ""),
                  "descricao": f"Nota {it['nota']}" if it.get("nota") else "Nota sem número",
                  "doc": it.get("doc", ""), "tipo": it.get("tipo", "?"),
                  "credor": it.get("fornecedor", ""), "valor": it["valor"], "categoria": "Verba indenizatória"})

@@ -55,8 +55,9 @@ _TR = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S)
 _TD = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
 
 
-def baixar_detalhe(codigo: str, ano: int) -> str:
-    return http.get(config.ALMG["detalhe"].format(id=codigo, ano=ano), timeout=90).text
+def baixar_detalhe(codigo: str, periodo: str) -> str:
+    """periodo no formato MMAAAA (ex.: '102023' = outubro de 2023), como o seletor do portal."""
+    return http.get(config.ALMG["detalhe"].format(id=codigo, periodo=periodo), timeout=90).text
 
 
 def ler_detalhe(texto: str) -> list[dict]:

@@ -124,7 +124,7 @@ ALMG = {
     "sigla": "ALMG",
     "legislatura": 20,   # 20ª legislatura: 2023-2027
     "lista": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/?leg={leg}",
-    "detalhe": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/detalhe.html?id={id}&ano={ano}",
+    "detalhe": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/detalhe.html?id={id}&periodo={periodo}",
     "verba_pagina": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/",
     "deputados_pagina": "https://www.almg.gov.br/a-assembleia/deputados/inicial/",
     "perfil": "https://www.almg.gov.br/transparencia/prestacao-de-contas/deputados/verba-indenizatoria/detalhe.html?id={slug}",
